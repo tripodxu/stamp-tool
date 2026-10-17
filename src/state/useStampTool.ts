@@ -8,6 +8,7 @@ import {
   stampDocument,
 } from '../lib/exporter';
 import { loadSealFile, reencodeSealPng } from '../lib/seal';
+import { saveBytesAs } from '../lib/saveAs';
 import { mmToPt, STANDARD_SEAL_MM } from '../lib/units';
 import {
   clamp,
@@ -54,7 +55,8 @@ export function useStampTool() {
   const nudgeSession = useRef<{ id: string; t: number }>({ id: '', t: 0 });
 
   // ---- 文档 ----
-  const openPdf = useCallback(async (file: File) => {
+  /** 真正的载入过程。调用方负责先确认「盖的章可以丢」。 */
+  const loadPdfFile = useCallback(async (file: File) => {
     dispatch({ type: 'LOAD_PDF' });
     try {
       // 只读一次文件。pdf.js 拿走这块 buffer（可能 detach），导出时再从 File 重读。
@@ -74,6 +76,33 @@ export function useStampTool() {
       dispatch({ type: 'ERROR', message: (e as Error).message });
     }
   }, []);
+
+  /**
+   * 打开 PDF。
+   *
+   * 已经盖了章就先问一句再动手：LOAD_PDF 会连撤销栈一起清掉，是应用里
+   * 唯一退不回来的操作，手滑选错文件就真的白盖了。
+   */
+  const openPdf = useCallback(
+    async (file: File) => {
+      if (stateRef.current.stamps.length > 0) {
+        dispatch({ type: 'PDF_CONFIRM', file });
+        return;
+      }
+      await loadPdfFile(file);
+    },
+    [loadPdfFile],
+  );
+
+  /** 横幅上的「仍然打开」：丢掉当前这批章，载入新文件。 */
+  const confirmOpenPdf = useCallback(async () => {
+    const file = stateRef.current.pendingPdf;
+    if (!file) return;
+    dispatch({ type: 'PDF_CANCEL' }); // 先收横幅，再进 LOAD_PDF 的忙碌态
+    await loadPdfFile(file);
+  }, [loadPdfFile]);
+
+  const cancelOpenPdf = useCallback(() => dispatch({ type: 'PDF_CANCEL' }), []);
 
   // ---- 印章库 ----
   /** 把一枚已处理好的印章设为当前印章（本地库与内存共用这条路径）。 */
@@ -265,14 +294,20 @@ export function useStampTool() {
   );
 
   // ---- 导出 ----
+  /** 用户上一次点的是「导出 PDF」还是「另存为…」，签名警告确认后要接着走同一条路。 */
+  const exportAsRef = useRef(false);
+
   /**
+   * 真正干活的那一步：检查签名 → 盖章 → 返回字节与建议文件名。
+   * 用户取消（签名警告）时返回 null。
+   *
    * force=true 表示用户已在警告条上确认过「明知签名会失效」。
    * 检测与盖章共用同一个已载入的 PDFDocument，不重复解析。
    */
-  const exportPdf = useCallback(async (force = false) => {
+  const buildExport = useCallback(async (force: boolean) => {
     const { docFile, stamps, docFileName, pages, busy } = stateRef.current;
     // busy 期间直接忽略：导出按钮没有「进行中」态，连点会跑两遍
-    if (!docFile || busy) return;
+    if (!docFile || busy) return null;
     dispatch({ type: 'BUSY', label: '正在导出 PDF…' });
     try {
       const bytes = new Uint8Array(await docFile.arrayBuffer());
@@ -284,7 +319,7 @@ export function useStampTool() {
           message:
             '该 PDF 含有数字签名字段。追加印章会使已有签名立即失效，接收方验签将失败。',
         });
-        return;
+        return null;
       }
 
       // frames 必须是预览用的那一份页面几何（含 /Rotate、裁切框、UserUnit），
@@ -296,18 +331,69 @@ export function useStampTool() {
         prepareImage: reencodeSealPng,
       });
       const base = docFileName.replace(/\.pdf$/i, '');
-      const fileName = `${base}-已盖章.pdf`;
-      downloadBlob(out, fileName);
-      // 桌面版没有「另存为」对话框，文件直接落进系统下载目录。
-      // 必须明确告诉用户文件去哪了，否则「点了没反应」=「以为坏了」。
-      dispatch({ type: 'DONE', message: `已导出「${fileName}」，保存在「下载」文件夹。` });
+      return { out, fileName: `${base}-已盖章.pdf` };
     } catch (e) {
       const msg = (e as Error)?.name?.includes('Encrypted')
         ? '该 PDF 受保护，无法写入内容。请先移除密码。'
         : `导出失败：${(e as Error).message}`;
       dispatch({ type: 'ERROR', message: msg });
+      return null;
     }
   }, []);
+
+  const exportPdf = useCallback(
+    async (force = false) => {
+      exportAsRef.current = false;
+      const r = await buildExport(force);
+      if (!r) return;
+      downloadBlob(r.out, r.fileName);
+      // 桌面版默认把文件直接落进系统下载目录。必须明确告诉用户文件去哪了，
+      // 否则「点了没反应」=「以为坏了」。
+      dispatch({ type: 'DONE', message: `已导出「${r.fileName}」，保存在「下载」文件夹。` });
+    },
+    [buildExport],
+  );
+
+  /**
+   * 「另存为…」：让用户自己挑位置和文件名。
+   *
+   * 环境不支持（或这是一次没有用户手势的合成点击）就退回普通下载——
+   * 宁可文件落在「下载」里，也不能让按钮点了没反应。
+   */
+  const exportPdfAs = useCallback(
+    async (force = false) => {
+      exportAsRef.current = true;
+      const r = await buildExport(force);
+      if (!r) return;
+      let res;
+      try {
+        res = await saveBytesAs(r.out, r.fileName, {
+          mime: 'application/pdf',
+          description: 'PDF 文件',
+          ext: '.pdf',
+        });
+      } catch (e) {
+        dispatch({ type: 'ERROR', message: `另存为失败：${(e as Error).message}` });
+        return;
+      }
+      if (res.status === 'cancelled') return; // 用户自己取消的，不该弹「已保存」
+      if (res.status === 'saved') {
+        dispatch({ type: 'DONE', message: `已保存「${res.name}」。` });
+        return;
+      }
+      downloadBlob(r.out, r.fileName);
+      dispatch({
+        type: 'DONE',
+        message: `这个环境不支持「另存为」，已导出到「下载」文件夹。`,
+      });
+    },
+    [buildExport],
+  );
+
+  /** 签名警告条上的「仍然导出」：接着用户当初点的那条路走。 */
+  const confirmExport = useCallback(() => {
+    void (exportAsRef.current ? exportPdfAs(true) : exportPdf(true));
+  }, [exportPdf, exportPdfAs]);
 
   // ---- 卸载清理 ----
   useEffect(
@@ -335,6 +421,8 @@ export function useStampTool() {
     stats,
     pdfHandle,
     openPdf,
+    confirmOpenPdf,
+    cancelOpenPdf,
     openSeal,
     useSavedSeal,
     removeSavedSeal,
@@ -352,6 +440,8 @@ export function useStampTool() {
     undo,
     redo,
     exportPdf,
+    exportPdfAs,
+    confirmExport,
     clearError,
     clearDone,
     clearSignWarning,

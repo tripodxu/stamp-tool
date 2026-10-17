@@ -170,11 +170,41 @@ python scripts/check-export-alpha.py 导出的.pdf --image 对照图.png
 
     python scripts/acceptance-batch.py
 
+## 操作手感：换文档先问一句、翻页、另存为
+
+![换文档确认条](testdata/ux-confirm-open.png)
+
+三处都是「用起来别扭」而不是「算错了」，所以旧脚本一个都覆盖不到——专门写了
+`scripts/acceptance-ux.py` 在真实窗口里逐条验收。
+
+- **换文档会先问一句**。载入新 PDF 要连撤销栈一起清空，是整个应用里唯一退不回来的操作；
+  已经盖了章时改为一句话确认（「会清空当前已盖的 3 枚印章，且无法撤销」，配取消 /
+  仍然打开），点「取消」则文档、印章、撤销栈原样不动。以前是直接换掉，手滑选错文件就白盖了。
+- **翻页**：页码可以直接敲（回车跳转，越界夹回范围），`PageUp`/`PageDown`/`Home`/`End`
+  也能翻页；右上角「有章 (N)」下拉直接列出盖过章的页，跳过去顺手选中那一页的章
+  （否则跳过去也看不出章在哪）。换页会把视口滚回页首，不再停在上一页的中段。
+- **另存为**：导出拆成「主按钮 + ▾」，主按钮仍是导出到系统「下载」文件夹（一次点击），
+  点 ▾ 里的「另存为…」才弹系统对话框让用户挑位置和文件名。用的是 WebView2 自带的
+  File System Access（`showSaveFilePicker`），**没有为此引入任何 Tauri 插件**；
+  环境不支持或这次调用没有用户手势时，自动回退成普通下载并如实相告——按钮点了必须有反应。
+
+![页码与「有章」下拉](testdata/ux-pager-menu.png)
+
+工具栏在默认窗口（1280×860 逻辑像素）里仍然是一行：列间距从 14px 收到 10px、
+下拉按钮从「有章的页 (N)」缩短为「有章 (N)」，这两处都是量着改的（见下）。
+窗口再窄时右侧那组（印章数 / 构建时间 / 导出）整体换到第二行并靠右，而不是留在左边
+像是排版坏了。
+
+验收脚本（真的开窗口点这些控件；「另存为」在脚本里注入一个假的 picker，
+因为原生文件对话框没法自动化）：
+
+    python scripts/acceptance-ux.py
+
 ## 测试
 
 ```bash
-npm test                                # 单测：11 个文件 / 106 条（映射/几何/单位/撤销栈/
-                                        #   导出矩阵/PNG 编码/ZIP/批量页码）
+npm test                                # 单测：12 个文件 / 118 条（映射/几何/单位/撤销栈/
+                                        #   导出矩阵/PNG 编码/ZIP/批量页码/另存为）
 npm run test:watch                      # 同上，改动即跑
 python scripts/check-pagefixtures.py    # 夹具自检（栅格化确认方向没搞反）
 python scripts/check-export-alpha.py X.pdf   # 导出体检：透明区是不是白的（防黑框）
@@ -200,6 +230,7 @@ python scripts/acceptance.py             # 普通 A4：导入 → 盖章 → 导
 python scripts/acceptance-pageframes.py  # 旋转页 / 裁切框：四种页面逐一核对
 python scripts/acceptance-sealibrary.py  # 印章库：关掉再打开，验证不用重新导入
 python scripts/acceptance-batch.py       # 批量：4 份文件 → ZIP → 逐页量印迹
+python scripts/acceptance-ux.py          # 交互：换文档确认、翻页、跳页、另存为（17 条）
 ```
 
 调试端口由脚本自动挑：默认的 9333 可能被别的应用占着（实测遇到过），
@@ -221,6 +252,8 @@ Python 侧依赖：`pip install -r scripts/requirements.txt`。
 | `testdata/black-frame-before-after.png` | 导出黑框对照图（左=旧，右=修复后） |
 | `testdata/ghost-before-after.png` | 翻拍章「重影」对照图（左=旧，右=修复后） |
 | `testdata/batch-panel.png` | 批量盖章面板（上面那一节用的截图） |
+| `testdata/ux-confirm-open.png` | 换文档确认条（操作手感那一节） |
+| `testdata/ux-pager-menu.png` | 页码输入与「有章」下拉 |
 
 夹具的角标刻意用**蓝色**：像素校验靠「红 = 印章」找印迹，夹具自己再用红色就会污染测量。
 
@@ -234,6 +267,7 @@ src/lib/seal.ts            印章预处理：去白边、去纸背、裁剪到�
 src/lib/sealPixels.ts      像素算法（纯函数、可单测）：判真 alpha、纸/墨调色板、反预乘
 src/lib/png.ts             自写极简 PNG 编码器（透明区颜色由我们说了算）
 src/lib/sealStore.ts       印章库：IndexedDB 持久化、内容指纹去重、LRU 淘汰
+src/lib/saveAs.ts          「另存为」：包一层 File System Access，区分保存/取消/不支持
 src/lib/geometry.ts        摆放决策：预设位置、默认位置、夹紧（画布/跨页/批量共用）
 src/lib/batch.ts           批量：页码规则解析 + 按规则给每一页算出印章
 src/lib/zip.ts             极简 ZIP 写出（store / deflate，不引第三方库）
@@ -246,5 +280,7 @@ src/state/useStampTool.ts  把上面这些接成 React hook
 
 - **exe 不能放在 `play` 目录树内运行**（WebView2 `0x800700AA`），详见 [README-打包.md](README-打包.md)。
 - 未签名 exe：Windows SmartScreen 会提示"未知发布者"。
-- 导出走浏览器 blob 下载，不弹"另存为"对话框，文件直接落进系统下载目录（界面会明确提示）。
+- 默认导出走浏览器 blob 下载，文件直接落进系统「下载」文件夹（界面会明确提示）；
+  想自己挑位置就用「导出 PDF ▾ → 另存为…」——它依赖 WebView2 的 File System Access，
+  环境不支持时自动回退到下载。
 - 盖在照片/深色底图上时，普通 alpha 混合与正片叠底不等价，印油观感会有偏差（设计文档 §3 决策 2）。

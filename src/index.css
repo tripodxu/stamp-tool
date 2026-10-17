@@ -40,7 +40,9 @@ body {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  /* 列间距 10px 是量出来的：默认窗口 1280 逻辑像素下，14px 会把导出挤到第二行 */
+  gap: 10px;
+  row-gap: 6px;
   padding: 10px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -65,6 +67,13 @@ body {
   flex: 1;
 }
 
+/* 右侧这一组（印章数、构建时间、导出）整体靠右：宽窗口时一行放得下，
+   窄窗口（默认就是 1280 逻辑像素）装不下时它们一起换到第二行、仍然靠右，
+   而不是孤零零留在左边像是排版坏了 */
+.toolbar .count {
+  margin-left: auto;
+}
+
 .toolbar .count {
   color: var(--muted);
   font-size: 13px;
@@ -82,6 +91,97 @@ body {
   text-align: center;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* 页码可以直接敲：几十页的合同连点「下一页」太慢 */
+.toolbar .pager .page-input {
+  width: 46px;
+  padding: 6px 4px;
+  text-align: center;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.toolbar .pager .page-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 输入框顶掉了原来的页码文本，别继承 62px 的最小宽度 */
+.toolbar .pager .page-total {
+  min-width: 0;
+}
+
+/* 「有章的页」下拉：几十页的文档里直接跳到盖过章的地方 */
+.pager-menu {
+  position: relative;
+}
+
+.pager-menu-btn {
+  margin-left: 4px;
+}
+
+.pager-menu-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 132px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
+}
+
+.pager-menu-list button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  text-align: left;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.pager-menu-list button:hover {
+  background: var(--bg);
+}
+
+.pager-menu-list button.is-current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 导出的下拉菜单挂在按钮下面，别跟着 pager 的右对齐 */
+.export-group {
+  position: relative;
+  gap: 0;
+}
+
+.export-group .export-go {
+  border-radius: 6px 0 0 6px;
+}
+
+.export-group .export-caret {
+  padding: 6px 7px;
+  border-radius: 0 6px 6px 0;
+  border-left: 0;
+  line-height: 1;
+}
+
+.export-menu {
+  right: 0;
+  left: auto;
+  min-width: 176px;
 }
 
 button {

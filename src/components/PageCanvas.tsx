@@ -34,6 +34,18 @@ export function PageCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
 
+  /**
+   * 换页回到页首。
+   *
+   * 视口是整块滚动的，翻到下一页时如果保留滚动位置，用户会看到页面的
+   * 中段甚至页脚，像是「这一页怎么长得不一样」。全项目只此一处需要动
+   * 滚动位置，直接找视口元素，不必为此把 ref 一路传下来。
+   */
+  useEffect(() => {
+    const viewport = document.querySelector('.viewport');
+    if (viewport instanceof HTMLElement) viewport.scrollTo({ top: 0 });
+  }, [pageIndex]);
+
   // 按需渲染：只画当前页，架构上决定了不持有全量位图
   useEffect(() => {
     const canvas = canvasRef.current;

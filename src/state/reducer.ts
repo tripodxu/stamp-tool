@@ -32,6 +32,13 @@ export interface AppState {
   signWarning: string | null;
   /** 印章库：本机保存过的印章，按最近使用排序 */
   seals: SavedSeal[];
+  /**
+   * 等待确认的「换文档」请求。
+   *
+   * LOAD_PDF 会连撤销栈一起清掉，是应用里唯一不可挽回的操作；
+   * 已经盖了章就先把文件挂在这儿，等用户在横幅上点「仍然打开」。
+   */
+  pendingPdf: File | null;
 }
 
 export const initialState: AppState = {
@@ -50,6 +57,7 @@ export const initialState: AppState = {
   error: null,
   signWarning: null,
   seals: [],
+  pendingPdf: null,
 };
 
 export type Action =
@@ -59,6 +67,8 @@ export type Action =
   | { type: 'SEALS_LOADED'; seals: SavedSeal[] }
   | { type: 'SEAL_SAVED'; seal: SavedSeal }
   | { type: 'SEALS_DELETED'; ids: string[] }
+  | { type: 'PDF_CONFIRM'; file: File }
+  | { type: 'PDF_CANCEL' }
   | { type: 'ADD_STAMPS'; stamps: Stamp[] }
   | { type: 'UPDATE_STAMP'; id: string; patch: Partial<Stamp>; history?: boolean }
   | { type: 'BEGIN_EDIT' }
@@ -97,13 +107,21 @@ export function reducer(state: AppState, action: Action): AppState {
         done: null,
         error: null,
         signWarning: null,
+        pendingPdf: null,
       };
+
+    case 'PDF_CONFIRM':
+      return { ...state, pendingPdf: action.file };
+
+    case 'PDF_CANCEL':
+      return { ...state, pendingPdf: null };
 
     case 'PDF_READY':
       return {
         ...state,
         busy: null,
         error: null,
+        pendingPdf: null,
         docFile: action.file,
         docFileName: action.handle.fileName,
         pages: action.handle.pages,
@@ -220,7 +238,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, done: action.message, busy: null, signWarning: null };
 
     case 'ERROR':
-      return { ...state, error: action.message, busy: null, done: null };
+      return { ...state, error: action.message, busy: null, done: null, pendingPdf: null };
 
     case 'SIGN_WARNING':
       return { ...state, signWarning: action.message, busy: null };

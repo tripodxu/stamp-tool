@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Props {
   hasDoc: boolean;
@@ -6,6 +6,8 @@ interface Props {
   stampCount: number;
   pageCount: number;
   page: number;
+  /** 有印章的页码（0 起），用于「有章的页」快速跳转 */
+  stampPages: number[];
   zoom: number;
   canUndo: boolean;
   canRedo: boolean;
@@ -15,10 +17,13 @@ interface Props {
   onOpenSeal: (file: File) => void;
   onAddStamp: () => void;
   onPage: (p: number) => void;
+  onJumpToPage: (p: number) => void;
   onZoom: (z: number) => void;
   onUndo: () => void;
   onRedo: () => void;
   onExport: () => void;
+  /** 导出到用户自己挑的位置（环境不支持时自动退回下载） */
+  onExportAs: () => void;
   /** 批量盖章：一次给多份 PDF 盖上同一枚章 */
   onBatch: () => void;
 }
@@ -26,6 +31,47 @@ interface Props {
 export function Toolbar(p: Props) {
   const pdfRef = useRef<HTMLInputElement>(null);
   const sealRef = useRef<HTMLInputElement>(null);
+  /** 页码输入框里正在敲的内容；null 表示跟随当前页 */
+  const [pageDraft, setPageDraft] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  /** 「导出」旁边的下拉：主按钮还是导出到「下载」，另存为是备选 */
+  const [exportMenu, setExportMenu] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  // 点别处 / 按 Esc 关掉下拉菜单
+  useEffect(() => {
+    if (!menuOpen && !exportMenu) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!menuRef.current?.contains(t)) setMenuOpen(false);
+      if (!exportRef.current?.contains(t)) setExportMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+        setExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen, exportMenu]);
+
+  // 换页（或页数变了）就丢掉草稿，别让输入框停在旧值上
+  useEffect(() => setPageDraft(null), [p.page, p.pageCount]);
+
+  /** 提交手敲的页码：越界就夹回范围，非数字就当没敲 */
+  const commitPage = () => {
+    const n = Number.parseInt(pageDraft ?? '', 10);
+    setPageDraft(null);
+    if (!Number.isFinite(n)) return;
+    const target = Math.min(p.pageCount, Math.max(1, n)) - 1;
+    if (target !== p.page) p.onPage(target);
+  };
 
   return (
     <header className="toolbar">
@@ -60,18 +106,74 @@ export function Toolbar(p: Props) {
 
       {p.hasDoc && p.pageCount > 1 && (
         <div className="group pager">
-          <button onClick={() => p.onPage(p.page - 1)} disabled={p.page === 0}>
+          <button
+            onClick={() => p.onPage(p.page - 1)}
+            disabled={p.page === 0}
+            title="上一页 (PageUp)"
+          >
             ‹
           </button>
-          <span>
-            {p.page + 1} / {p.pageCount}
-          </span>
+          {/* 页码可以直接敲：几十页的合同翻起来比连点快得多 */}
+          <input
+            className="page-input"
+            value={pageDraft ?? String(p.page + 1)}
+            inputMode="numeric"
+            aria-label="页码"
+            title="输入页码后回车跳转"
+            onChange={(e) => setPageDraft(e.target.value.replace(/[^0-9]/g, ''))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitPage();
+                (e.target as HTMLInputElement).blur();
+              } else if (e.key === 'Escape') {
+                setPageDraft(null);
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            onBlur={commitPage}
+          />
+          <span className="page-total">/ {p.pageCount}</span>
           <button
             onClick={() => p.onPage(p.page + 1)}
             disabled={p.page >= p.pageCount - 1}
+            title="下一页 (PageDown)"
           >
             ›
           </button>
+
+          {p.stampPages.length > 0 && (
+            <div className="pager-menu" ref={menuRef}>
+              <button
+                className="pager-menu-btn"
+                aria-haspopup="listbox"
+                aria-expanded={menuOpen}
+                title="跳到盖了章的页"
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                有章 ({p.stampPages.length})
+              </button>
+              {menuOpen && (
+                <ul className="pager-menu-list" role="listbox">
+                  {p.stampPages.map((idx) => (
+                    <li key={idx}>
+                      <button
+                        role="option"
+                        aria-selected={idx === p.page}
+                        className={idx === p.page ? 'is-current' : undefined}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          p.onJumpToPage(idx);
+                        }}
+                      >
+                        第 {idx + 1} 页
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -85,8 +187,6 @@ export function Toolbar(p: Props) {
         </button>
       </div>
 
-      <div className="spacer" />
-
       <span className="count">
         {p.hasDoc ? `${p.stampCount} 枚印章` : '尚未选择文件'}
       </span>
@@ -96,13 +196,41 @@ export function Toolbar(p: Props) {
         构建 {__BUILD_STAMP__}
       </span>
 
-      <button
-        onClick={p.onExport}
-        disabled={!p.hasDoc || p.stampCount === 0 || p.busy}
-        className="primary"
-      >
-        {p.busy ? '处理中…' : '导出 PDF'}
-      </button>
+      {/* 导出拆成主按钮 + 下拉：多一个「另存为」按钮会把工具栏挤到换行 */}
+      <div className="group export-group" ref={exportRef}>
+        <button
+          onClick={p.onExport}
+          disabled={!p.hasDoc || p.stampCount === 0 || p.busy}
+          className="primary export-go"
+        >
+          {p.busy ? '处理中…' : '导出 PDF'}
+        </button>
+        <button
+          className="export-caret"
+          onClick={() => setExportMenu((v) => !v)}
+          disabled={!p.hasDoc || p.stampCount === 0 || p.busy}
+          title="更多导出方式"
+          aria-haspopup="menu"
+          aria-expanded={exportMenu}
+        >
+          ▾
+        </button>
+        {exportMenu && (
+          <ul className="pager-menu-list export-menu" role="menu">
+            <li>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setExportMenu(false);
+                  p.onExportAs();
+                }}
+              >
+                另存为…（自己选位置）
+              </button>
+            </li>
+          </ul>
+        )}
+      </div>
 
       <input
         ref={pdfRef}

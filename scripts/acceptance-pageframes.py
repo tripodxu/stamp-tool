@@ -104,6 +104,16 @@ def main():
             nid = ws.call("DOM.querySelector", {"nodeId": doc, "selector": sel})["nodeId"]
             ws.call("DOM.setFileInputFiles", {"files": [str(path)], "nodeId": nid})
 
+        # 换文档时会先弹「会清空当前已盖的印章」确认条（第二份夹具起就会遇到），
+        # 自动化里直接点「仍然打开」——这条流程本身由 acceptance-ux.py 单独验收。
+        CONFIRM = ("[...document.querySelectorAll('.banner.warn')]"
+                   ".find(b=>b.textContent.includes('清空当前已盖'))")
+
+        def open_pdf(path):
+            set_file('input[accept*="pdf"]', path)
+            if wait(f"!!({CONFIRM})", 5):
+                ev(f"{CONFIRM}.querySelector('button.primary').click()")
+
         assert wait("!!document.querySelector('.toolbar')"), "界面未加载"
         set_file('input[accept*="image"]', SEAL)
         assert wait("document.querySelector('.panel').innerText.includes('DPI')"), "印章未载入"
@@ -114,7 +124,7 @@ def main():
                 results.append((name, None, "夹具不存在，先跑 make-pagefixtures.mjs"))
                 continue
 
-            set_file('input[accept*="pdf"]', src)
+            open_pdf(src)
             # 等新文档就位：旧章清空 + 不在读盘 + 画布已存在。只看 canvas 会误判，
             # 它在新文档解析完之前就已经在 DOM 里了。
             assert wait("!document.querySelector('.banner.busy')"

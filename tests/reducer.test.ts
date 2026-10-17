@@ -192,3 +192,46 @@ describe('印章库', () => {
   });
 });
 
+describe('换文档确认（换文件会连撤销栈一起清，退不回来）', () => {
+  const file = new File([new Uint8Array([1])], '新合同.pdf', { type: 'application/pdf' });
+
+  it('待确认的文件挂在 pendingPdf 上，此时文档还没换', () => {
+    const s = reducer(added, { type: 'PDF_CONFIRM', file });
+    expect(s.pendingPdf).toBe(file);
+    expect(s.stamps).toHaveLength(1); // 旧章还在，直到用户点「仍然打开」
+  });
+
+  it('取消：横幅收掉，什么都不变', () => {
+    let s = reducer(added, { type: 'PDF_CONFIRM', file });
+    s = reducer(s, { type: 'PDF_CANCEL' });
+    expect(s.pendingPdf).toBeNull();
+    expect(s.stamps).toHaveLength(1);
+    expect(s.past.length).toBe(added.past.length);
+  });
+
+  it('确认后真正载入：撤销栈、印章、待确认项一起清空', () => {
+    let s = reducer(added, { type: 'PDF_CONFIRM', file });
+    s = reducer(s, { type: 'LOAD_PDF' });
+    expect(s.pendingPdf).toBeNull();
+    expect(s.stamps).toEqual([]);
+    expect(s.past).toEqual([]);
+  });
+
+  it('载入失败也要收掉横幅，不能让「仍然打开」永远挂着', () => {
+    let s = reducer(added, { type: 'PDF_CONFIRM', file });
+    s = reducer(s, { type: 'ERROR', message: '不是 PDF' });
+    expect(s.pendingPdf).toBeNull();
+  });
+
+  it('载入成功（PDF_READY）同样收掉横幅', () => {
+    let s = reducer(added, { type: 'PDF_CONFIRM', file });
+    s = reducer(s, {
+      type: 'PDF_READY',
+      handle: { pages: [], doc: null, name: 'x' } as never,
+      zoom: 1,
+      file,
+    });
+    expect(s.pendingPdf).toBeNull();
+  });
+});
+
