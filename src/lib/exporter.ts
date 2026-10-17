@@ -159,14 +159,19 @@ function keyOf(bytes: Uint8Array): string {
   return `${bytes.length}:${h >>> 0}`;
 }
 
-export function downloadBlob(bytes: Uint8Array, fileName: string) {
-  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+/** 触发一次浏览器下载。批量导出（ZIP）也走这里，只是 MIME 与后缀不同。 */
+export function downloadBytes(bytes: Uint8Array, fileName: string, mime: string) {
+  const blob = new Blob([bytes as BlobPart], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+  a.download = fileName;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function downloadBlob(bytes: Uint8Array, fileName: string) {
+  downloadBytes(bytes, fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`, 'application/pdf');
 }

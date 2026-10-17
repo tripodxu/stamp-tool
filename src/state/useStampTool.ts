@@ -9,7 +9,14 @@ import {
 } from '../lib/exporter';
 import { loadSealFile, reencodeSealPng } from '../lib/seal';
 import { mmToPt, STANDARD_SEAL_MM } from '../lib/units';
-import { defaultOpacity, defaultPlacement, presetPatch, type StampPreset } from '../lib/geometry';
+import {
+  clamp,
+  clampPlacement,
+  defaultOpacity,
+  defaultPlacement,
+  presetPatch,
+  type StampPreset,
+} from '../lib/geometry';
 import { revokeAllPngUrls } from '../lib/pngCache';
 import {
   deleteSeal as deleteSealFromStore,
@@ -186,9 +193,8 @@ export function useStampTool() {
         ...src,
         id: nextId(),
         pageIndex: i,
-        // 页面尺寸可能不同，按边距比例夹回可视范围
-        xPt: clamp(src.xPt, -src.widthPt * 0.75, page.wPt - src.widthPt * 0.25),
-        yPt: clamp(src.yPt, -src.heightPt * 0.75, page.hPt - src.heightPt * 0.25),
+        // 页面尺寸可能不同，夹回可视范围
+        ...clampPlacement(src, page),
       });
     }
     dispatch({ type: 'ADD_STAMPS', stamps: clones });
@@ -356,7 +362,6 @@ let idSeq = 0;
 const nextId = () => `stamp-${++idSeq}-${Date.now().toString(36)}`;
 
 const clampZoom = (z: number) => Math.min(4, Math.max(0.25, Math.round(z * 20) / 20));
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
  * 视口可用宽度。量真实 DOM 而不是写死 `innerWidth - 520`：

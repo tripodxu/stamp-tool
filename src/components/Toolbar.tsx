@@ -19,6 +19,8 @@ interface Props {
   onUndo: () => void;
   onRedo: () => void;
   onExport: () => void;
+  /** 批量盖章：一次给多份 PDF 盖上同一枚章 */
+  onBatch: () => void;
 }
 
 export function Toolbar(p: Props) {
@@ -37,6 +39,13 @@ export function Toolbar(p: Props) {
         <button onClick={() => sealRef.current?.click()}>上传印章</button>
         <button onClick={p.onAddStamp} disabled={!p.hasSeal}>
           放置印章
+        </button>
+        <button
+          onClick={p.onBatch}
+          disabled={!p.hasSeal || p.busy}
+          title="一次给多份 PDF 盖上同一枚章，最后打包成一个 ZIP"
+        >
+          批量盖章
         </button>
       </div>
 

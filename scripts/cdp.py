@@ -19,10 +19,14 @@ from pathlib import Path
 #   STAMP_EXE      打包好的 exe（默认在桌面，见 README-打包.md：不能放在项目目录树里）
 #   STAMP_TESTDATA 夹具目录（默认仓库内的 testdata/）
 #   STAMP_OUTDIR   下载落盘目录（默认 testdata/_downloads，已被 .gitignore 忽略）
-#   STAMP_CDP_PORT 调试端口
+#   STAMP_CDP_PORT 调试端口（不指定就自己挑一个空的，见 free_port）
 ROOT = Path(__file__).resolve().parent.parent
 
-PORT = int(os.environ.get("STAMP_CDP_PORT", "9333"))
+# 调试端口默认不写死 9333：那个端口很可能被别的应用占着（实测遇到一个 Electron
+# 应用占着它）。WebView2 绑不上端口时会**静默**放弃调试接口，脚本却照样能连上
+# 占用者，于是报出「界面未加载」这种牛头不对马嘴的错。所以：没显式指定时，
+# 在 9333 往上找第一个没人监听的端口。0 表示「还没定」。
+PORT = int(os.environ.get("STAMP_CDP_PORT") or 0)
 EXE = Path(os.environ.get("STAMP_EXE") or (Path.home() / "Desktop" / "印章工具.exe"))
 TESTDATA = Path(os.environ.get("STAMP_TESTDATA") or (ROOT / "testdata"))
 OUTDIR = Path(os.environ.get("STAMP_OUTDIR") or (TESTDATA / "_downloads"))
@@ -115,17 +119,53 @@ class WS:
             pass
 
 
-def find_page_target(port=PORT):
+def free_port(start=9333, tries=50):
+    """从 start 往上找第一个没人监听的端口。"""
+    for p in range(start, start + tries):
+        with socket.socket() as s:
+            s.settimeout(0.25)
+            if s.connect_ex(("127.0.0.1", p)) != 0:  # 连不上＝空着
+                return p
+    raise SystemExit(f"{start}~{start + tries - 1} 都被占用了，用 STAMP_CDP_PORT 指定一个空端口")
+
+
+def active_port():
+    """launch() 与 find_page_target() 必须用同一个端口，所以只在这里决定一次。"""
+    global PORT
+    if not PORT:
+        PORT = free_port()
+    return PORT
+
+
+def is_ours(target):
+    """只认印章工具自己的页面——同一个调试端口上可能有别人的应用。"""
+    url = target.get("url") or ""
+    return (url.startswith("http://tauri.localhost") or url.startswith("tauri://")
+            or "印章工具" in (target.get("title") or ""))
+
+
+def find_page_target(port=None):
+    port = port or active_port()
+    others = []
     for _ in range(60):
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=2) as r:
                 targets = json.load(r)
             for t in targets:
-                if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
+                if t.get("type") != "page" or not t.get("webSocketDebuggerUrl"):
+                    continue
+                if is_ours(t):
                     return t
+                label = f"{t.get('title')} <{t.get('url')}>"
+                if label not in others:
+                    others.append(label)
         except Exception:
             pass
         time.sleep(1)
+    print(f"没找到印章工具的页面（127.0.0.1:{port}）。")
+    if others:
+        print("  这个端口上看到的是别人的页面：" + "；".join(others))
+        print("  说明印章工具没能绑上这个端口（换个空端口会自动重挑，或用 STAMP_CDP_PORT 指定）。")
     return None
 
 
@@ -141,7 +181,8 @@ def kill_stale():
     time.sleep(0.5)
 
 
-def launch(port=PORT):
+def launch(port=None):
+    port = port or active_port()
     if not EXE.exists():
         raise SystemExit(
             f"找不到打包好的 exe：{EXE}\n"

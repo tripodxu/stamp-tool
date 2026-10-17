@@ -70,6 +70,23 @@ export function defaultOpacity(bgMode: 'alpha' | 'paper'): number {
   return bgMode === 'paper' ? 1 : 0.85;
 }
 
+/**
+ * 把一枚章夹进页面里：允许出血，但至少保留四分之一在页内，
+ * 免得章被拖丢/复制到别页后彻底找不回来。
+ *
+ * 三个调用方共用这一条规则（画布拖拽、跨页复制、批量盖章）——
+ * 批量时每份文件的页面尺寸都可能不同，照搬画布上的坐标就会整个掉出页面。
+ */
+export function clampPlacement(
+  s: Pick<Stamp, 'xPt' | 'yPt' | 'widthPt' | 'heightPt'>,
+  page: { wPt: number; hPt: number },
+): Pick<Stamp, 'xPt' | 'yPt'> {
+  return {
+    xPt: clamp(s.xPt, -s.widthPt * 0.75, page.wPt - s.widthPt * 0.25),
+    yPt: clamp(s.yPt, -s.heightPt * 0.75, page.hPt - s.heightPt * 0.25),
+  };
+}
+
 /** 新章的默认位置：页面中下方，略带倾斜（实际盖章通常不是正的）。 */
 export function defaultPlacement(
   size: { widthPt: number; heightPt: number },

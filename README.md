@@ -1,7 +1,8 @@
 # 印章工具 · 轻量 PDF 盖章
 
 把一枚背景透明的公章图片，经拖拽/缩放/旋转后盖到 PDF 的任意位置，导出仍是**原文档 + 一枚图**：
-文字还是文字、字体还是原字体、矢量零损失。全部处理在本地浏览器/WebView 内完成，文件不上传。
+文字还是文字、字体还是原字体、矢量零损失。也可以**一次给多份文件批量盖章**（同一枚章、
+同一套摆放规则，最后打包成一个 ZIP）。全部处理在本地浏览器/WebView 内完成，文件不上传。
 
 打包成单文件 exe 的流程与已知环境坑见 [README-打包.md](README-打包.md)；
 最初的架构推导见 [docs/设计文档.md](docs/设计文档.md)，
@@ -145,10 +146,36 @@ python scripts/check-export-alpha.py 导出的.pdf --image 对照图.png
 
     python scripts/acceptance-sealibrary.py
 
+## 批量盖章：一次选多份，同一套规则
+
+![批量盖章面板](testdata/batch-panel.png)
+
+一次选多份 PDF（能连选、也能反复追加），用**同一枚章、同一套摆放规则**逐份盖章，
+最后打包成**一个 ZIP**（条目名 `<原名>-已盖章.pdf`）。逐份独立处理、互不影响：
+某一份失败不会中断整批，界面上逐条给出 ✓/✗ 与原因。
+
+- **位置是规则，不是绝对坐标**。画布上已经有章时，可以沿用「距页左上角的偏移」；
+  画布上没有章（或想换规则）就按**预设**（落款处 / 右下角 / 骑缝）逐页重算——
+  页面尺寸不同会自动适配。这正是批量必须用规则的原因：各文件的页数与页面大小都可能不同。
+- **页码**写 `1,3,5-8`，或者 `末页`；**留空＝全部页**。越界的页号直接忽略，
+  这样同一份规则能套在页数不同的文件上；某份文件一页都没选中就跳过它并记原因。
+- **含数字签名的文件跳过**并记原因——盖章会让签名失效，批量里不该替用户做这个决定
+  （单份导出那条路是弹警告让用户确认）。
+- **输出只能是 ZIP**：Chromium 会把同一会话里第二次之后的下载当成「自动下载」拦掉，
+  一次导 N 个文件必然丢文件；打包成一次下载才可靠。
+- 不做「直接写进某个文件夹」（`showDirectoryPicker`）：原生选择器没法自动化验收，
+  而代价只是用户多解压一次。
+
+端到端验收（真实窗口里跑三批：全部页 / 末页 / 页码全部越界）：
+
+    python scripts/acceptance-batch.py
+
 ## 测试
 
 ```bash
-npm test                                # 单测：映射/几何/单位/撤销栈/导出矩阵/PNG 编码
+npm test                                # 单测：11 个文件 / 106 条（映射/几何/单位/撤销栈/
+                                        #   导出矩阵/PNG 编码/ZIP/批量页码）
+npm run test:watch                      # 同上，改动即跑
 python scripts/check-pagefixtures.py    # 夹具自检（栅格化确认方向没搞反）
 python scripts/check-export-alpha.py X.pdf   # 导出体检：透明区是不是白的（防黑框）
 ```
@@ -161,13 +188,24 @@ python scripts/check-export-alpha.py X.pdf   # 导出体检：透明区是不是
 `tests/png.test.ts` 同样不去自证编码器：它把编出来的 PNG 交给 pdf-lib 嵌入、再解出
 `/SMask` 与像素，断言透明区是白的；**还有一条对照用例专门断言「不漂白就是黑的」**，
 免得哪天 bug 复发而测试仍然全绿。
+`tests/zip.test.ts` 与 `tests/batch.test.ts` 是批量的两道守卫：前者**自己按 ZIP 规范把包读回来**
+（中央目录、CRC、UTF-8 名字标志位、同名去重、压不动时退回 store，逐条断言），不引第三方库
+——免得读写用同一个库、一起错还能一起过；后者盯页码解析（`末页`、`8-5` 倒序、越界忽略）
+与「同一套规则套在不同页面尺寸上」的结果。
 
 端到端验收（需要先 `npm run tauri build`，并把 exe 放到 `scripts/cdp.py` 里的 `EXE` 路径）：
 
 ```bash
 python scripts/acceptance.py             # 普通 A4：导入 → 盖章 → 导出 → 像素核对
 python scripts/acceptance-pageframes.py  # 旋转页 / 裁切框：四种页面逐一核对
+python scripts/acceptance-sealibrary.py  # 印章库：关掉再打开，验证不用重新导入
+python scripts/acceptance-batch.py       # 批量：4 份文件 → ZIP → 逐页量印迹
 ```
+
+调试端口由脚本自动挑：默认的 9333 可能被别的应用占着（实测遇到过），
+WebView2 抢不到端口时会**静默**放弃调试接口，脚本却会连上那个占用者、报出
+「界面未加载」这种误导性错误；所以 `scripts/cdp.py` 会从 9333 往上找第一个空端口，
+要固定就设 `STAMP_CDP_PORT`。
 
 Python 侧依赖：`pip install -r scripts/requirements.txt`。
 
@@ -182,6 +220,7 @@ Python 侧依赖：`pip install -r scripts/requirements.txt`。
 | `testdata/rotate90-bug-proof.png` | 修复前的错位对照图（绿=应到位置，蓝=实际） |
 | `testdata/black-frame-before-after.png` | 导出黑框对照图（左=旧，右=修复后） |
 | `testdata/ghost-before-after.png` | 翻拍章「重影」对照图（左=旧，右=修复后） |
+| `testdata/batch-panel.png` | 批量盖章面板（上面那一节用的截图） |
 
 夹具的角标刻意用**蓝色**：像素校验靠「红 = 印章」找印迹，夹具自己再用红色就会污染测量。
 
@@ -195,7 +234,10 @@ src/lib/seal.ts            印章预处理：去白边、去纸背、裁剪到�
 src/lib/sealPixels.ts      像素算法（纯函数、可单测）：判真 alpha、纸/墨调色板、反预乘
 src/lib/png.ts             自写极简 PNG 编码器（透明区颜色由我们说了算）
 src/lib/sealStore.ts       印章库：IndexedDB 持久化、内容指纹去重、LRU 淘汰
-src/lib/geometry.ts        摆放决策：预设位置、默认位置、夹紧
+src/lib/geometry.ts        摆放决策：预设位置、默认位置、夹紧（画布/跨页/批量共用）
+src/lib/batch.ts           批量：页码规则解析 + 按规则给每一页算出印章
+src/lib/zip.ts             极简 ZIP 写出（store / deflate，不引第三方库）
+src/state/useBatchStamp.ts 批量编排：逐份读文件、跳过带签名的、打包、进度与逐条结果
 src/state/reducer.ts       纯 reducer（可单测）：撤销栈语义都在这里
 src/state/useStampTool.ts  把上面这些接成 React hook
 ```

@@ -659,3 +659,256 @@ button.ghost {
   background: var(--accent-soft);
 }
 
+/* ---------- 批量盖章面板 ---------- */
+
+.batch-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 25, 35, 0.34);
+}
+
+.batch-card {
+  width: min(680px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(20, 25, 35, 0.28);
+}
+
+.batch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.batch-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.batch-body {
+  padding: 4px 14px 14px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.batch-step {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.batch-body > .batch-step:first-child {
+  border-top: none;
+}
+
+.batch-step h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.batch-step code {
+  padding: 0 3px;
+  background: var(--bg);
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.batch-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.batch-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-count b {
+  color: var(--text);
+}
+
+.batch-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 168px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.batch-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.batch-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-size {
+  flex: none;
+  max-width: 46%;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-mark.ok {
+  color: var(--ok);
+}
+
+.batch-mark.bad {
+  color: var(--bad);
+}
+
+.batch-input {
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.batch-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.batch-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.batch-radios label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.batch-radios label.on {
+  border-color: #e3b4b7;
+  background: var(--accent-soft);
+}
+
+.batch-radios input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.batch-dim {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-seal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.batch-seal img {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.batch-ok {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ok);
+}
+
+.batch-err {
+  margin: 0;
+  font-size: 12px;
+  color: var(--bad);
+}
+
+.batch-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.batch-foot .batch-dim {
+  margin-right: auto;
+}
+
+.batch-progress {
+  position: relative;
+  flex: 1;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.batch-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-soft);
+  transition: width 0.15s linear;
+}
+
+.batch-progress span {
+  position: relative;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

@@ -3,6 +3,7 @@ import { useStampTool } from './state/useStampTool';
 import { Toolbar } from './components/Toolbar';
 import { PageCanvas } from './components/PageCanvas';
 import { Inspector } from './components/Inspector';
+import { BatchPanel } from './components/BatchPanel';
 
 export default function App() {
   const tool = useStampTool();
@@ -10,6 +11,7 @@ export default function App() {
   const { exportPdf, undo, redo, select } = tool;
   const stampCount = state.stamps.length;
   const [dropping, setDropping] = useState(false);
+  const [batching, setBatching] = useState(false);
 
   // Ctrl+Z / Ctrl+Shift+Z / Ctrl+E
   // 依赖全部是稳定引用（useCallback），否则每次渲染都会解绑重绑监听
@@ -22,7 +24,11 @@ export default function App() {
         if (e.shiftKey) redo();
         else undo();
       }
-      if (e.key === 'Escape') select(null);
+      if (e.key === 'Escape') {
+        // 批量面板开着时，Esc 先关面板
+        if (batching) setBatching(false);
+        else select(null);
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'e' && stampCount) {
         e.preventDefault();
         void exportPdf();
@@ -30,7 +36,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [exportPdf, redo, undo, select, stampCount]);
+  }, [exportPdf, redo, undo, select, stampCount, batching]);
 
   const currentPage = state.pages[state.currentPage];
   // 拖一张章不该让同页所有章重渲染：数组引用必须稳定，否则 memo 白包
@@ -75,7 +81,17 @@ export default function App() {
         onUndo={undo}
         onRedo={redo}
         onExport={() => void exportPdf()}
+        onBatch={() => setBatching(true)}
       />
+
+      {batching && (
+        <BatchPanel
+          seal={state.seal}
+          stamp={selected}
+          page={currentPage ?? null}
+          onClose={() => setBatching(false)}
+        />
+      )}
 
       {state.error && (
         <div className="banner error">

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, type CSSProperties } from 'react';
 import type { Stamp } from '../lib/types';
-import { clamp } from '../lib/geometry';
+import { clamp, clampPlacement } from '../lib/geometry';
 import { pngObjectUrl } from '../lib/pngCache';
 
 interface Props {
@@ -134,8 +134,15 @@ function StampBoxImpl({
         const dx = (e.clientX - d.startX) / zoom;
         const dy = (e.clientY - d.startY) / zoom;
         // 允许部分出血，但保留四分之一在页内，避免章被拖丢后找不到
-        const x = clamp(d.originX + dx, -stamp.widthPt * 0.75, page.wPt - stamp.widthPt * 0.25);
-        const y = clamp(d.originY + dy, -stamp.heightPt * 0.75, page.hPt - stamp.heightPt * 0.25);
+        const { xPt: x, yPt: y } = clampPlacement(
+          {
+            xPt: d.originX + dx,
+            yPt: d.originY + dy,
+            widthPt: stamp.widthPt,
+            heightPt: stamp.heightPt,
+          },
+          page,
+        );
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
         onUpdate(stamp.id, { xPt: x, yPt: y }, false);
