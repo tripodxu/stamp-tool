@@ -18,7 +18,7 @@ npm run tauri build  # 打包 exe（产物在 src-tauri/target/release/）
 npm run fixtures     # 重新生成并自检「旋转页 / 裁切框」测试夹具
 ```
 
-## 四条不能破的架构决策
+## 四条不能破的架构决策（另有 3 条踩坑之后补的，见下）
 
 1. **编辑期不改文档像素**：预览是 pdf.js 渲染的 canvas + 一个绝对定位的 `<img>`，
    导出是 pdf-lib 往原内容流追加一次 `drawImage`。因此不需要 Konva/Fabric，
@@ -83,13 +83,54 @@ npm run fixtures     # 重新生成并自检「旋转页 / 裁切框」测试夹
 > 用它做像素测量（量位置、量直径）没问题，但**不能用它判断印章浓淡**——
 > 那是「基色 + SMask」的数学问题，按标准 alpha 合成算，或者直接用 pdf.js 看。
 
+### 第 7 条：PNG 要自己编码，**透明区的颜色不能交给 canvas**
+
+有些阅读器（老版 WPS、部分手机/邮件预览工具）**不理会 `/SMask`**，会把颜色图当实色画出来。
+如果 PNG 里 α=0 的像素 RGB 是黑的，盖出来的章外面就套一个**黑方块**——
+预览里正常、只在那些阅读器里发黑，出现这种症状就是这条。
+修复方向很朴素：**导出前保证透明区的颜色是白的**。
+
+但这件事**没法在 canvas 里做**。canvas 内部按**预乘 alpha** 存像素，α=0 的颜色一律被写成 (0,0,0)，
+在 `putImageData` 时刷的白，读回来、以及 `toBlob` 编出来的 PNG 里都会被丢掉：
+
+```js
+const px = [255,255,255,0, 255,255,255,0, 230,0,18,255, 230,0,18,255]
+ctx.putImageData(new ImageData(px, 2, 2), 0, 0)
+ctx.getImageData(0, 0, 2, 2).data   // → [0,0,0,0, 0,0,0,0, 230,0,18,255, …]  白色没了
+```
+
+所以 [png.ts](src/lib/png.ts) 里写了一个**极简 PNG 编码器**（8 位 RGBA、单 IDAT、
+第 0 行 None 滤波、其余行 Up、`CompressionStream('deflate')` 的输出正好是 PNG 需要的 zlib 流），
+像素处理全在 `Uint8ClampedArray` 上做，**字节完全由我们决定**：α=0 的像素颜色刷成白色
+（`bleachTransparent`），墨色原样保留。
+
+出口有两处，缺一不可：
+
+- **新导入的章**：[seal.ts](src/lib/seal.ts) 的 `loadSealFile` 直接用这个编码器出 PNG。
+- **印章库里已经存着的旧章**：那些字节是早期用 canvas 编的（透明区是黑的），
+  光改导入路径救不了它们。[exporter.ts](src/lib/exporter.ts) 因此多了个 `prepareImage` 钩子，
+  `useStampTool` 传的 `reencodeSealPng` 会在**导出前把每枚章重新走一遍像素处理 + 重编码**
+  （同一枚章在一次导出里只处理一次：嵌入去重仍按**原始**字节做的）。
+
+对照：[testdata/black-frame-before-after.png](testdata/black-frame-before-after.png)
+（左＝忽略 `/SMask` 的渲染器看到的旧文件，右＝修复后）。核查命令：
+
+```bash
+python scripts/check-export-alpha.py 导出的.pdf        # 退出码 0 = 透明区是白的
+python scripts/check-export-alpha.py 导出的.pdf --image 对照图.png
+```
+
+> 这个修复对**规范**阅读器（Acrobat / pdf.js / 新版 WPS）没有可见影响——
+> 它们本来就按 `/SMask` 合成，看不见透明区的颜色；它只影响忽略 `/SMask` 的那些。
+
 ## 印章库：导入一次，长期可用
 
 导入过的印章会自动存进本机（IndexedDB，见 [sealStore.ts](src/lib/sealStore.ts)），
 **下次打开直接点选，不必重新导入**；启动时自动选中最近用过的那一枚，打开即能盖章。
 
 - 存的是**处理之后**的 PNG（已去背、已裁到墨迹边界）——正是导出要嵌入的字节，
-  再次选用直接取用，不重跑像素处理。
+  再次选用直接取用，不重跑像素处理（早期版本存下的旧格式字节会在导出时重编码一次，
+  见上面第 7 条）。
 - 入库用内容指纹（FNV-1a + 长度）去重：同一枚章重复导入只留一条，只刷新时间。
 - 默认最多留 **30 枚**，超出淘汰最久没用过的（pickEvictions）。
 - 列表按**导入时间**排（点选不会让行跳动）；「最近使用」只用于启动时自动选中。
@@ -107,8 +148,9 @@ npm run fixtures     # 重新生成并自检「旋转页 / 裁切框」测试夹
 ## 测试
 
 ```bash
-npm test                                # 单测：映射/几何/单位/撤销栈/导出矩阵
+npm test                                # 单测：映射/几何/单位/撤销栈/导出矩阵/PNG 编码
 python scripts/check-pagefixtures.py    # 夹具自检（栅格化确认方向没搞反）
+python scripts/check-export-alpha.py X.pdf   # 导出体检：透明区是不是白的（防黑框）
 ```
 
 单测里最值得看的是 `tests/pageSpace.test.ts`：它**不重复实现公式去自证**，
@@ -116,6 +158,9 @@ python scripts/check-pagefixtures.py    # 夹具自检（栅格化确认方向�
 `tests/exporter.test.ts` 再进一步，直接解析导出文件内容流里的 `cm`/`Do` 矩阵，
 断言印章中心落在 pdf.js 指的位置。这两条一起把「预览/导出各说各话」这类 bug
 钉死在测试里——把 `displayToUser` 改回不认旋转，会有 11 条测试立刻变红。
+`tests/png.test.ts` 同样不去自证编码器：它把编出来的 PNG 交给 pdf-lib 嵌入、再解出
+`/SMask` 与像素，断言透明区是白的；**还有一条对照用例专门断言「不漂白就是黑的」**，
+免得哪天 bug 复发而测试仍然全绿。
 
 端到端验收（需要先 `npm run tauri build`，并把 exe 放到 `scripts/cdp.py` 里的 `EXE` 路径）：
 
@@ -135,6 +180,8 @@ Python 侧依赖：`pip install -r scripts/requirements.txt`。
 | `testdata/fixture-cropbox.pdf` | 裁切框四周内缩 20pt |
 | `testdata/seal-*.png` | 干净 / 带白边 / 低分辨率印章 |
 | `testdata/rotate90-bug-proof.png` | 修复前的错位对照图（绿=应到位置，蓝=实际） |
+| `testdata/black-frame-before-after.png` | 导出黑框对照图（左=旧，右=修复后） |
+| `testdata/ghost-before-after.png` | 翻拍章「重影」对照图（左=旧，右=修复后） |
 
 夹具的角标刻意用**蓝色**：像素校验靠「红 = 印章」找印迹，夹具自己再用红色就会污染测量。
 
@@ -144,7 +191,10 @@ Python 侧依赖：`pip install -r scripts/requirements.txt`。
 src/lib/pageSpace.ts       显示空间 ↔ 用户空间（含旋转轴反解）—— 坐标系唯一真源
 src/lib/exporter.ts        导出：签名检测、嵌入去重、追加 drawImage
 src/lib/pdfReader.ts       预览：worker/cMap 配置、按需渲染、采集页面帧
-src/lib/seal.ts            印章预处理：去白边、裁剪到墨迹、分辨率体检
+src/lib/seal.ts            印章预处理：去白边、去纸背、裁剪到墨迹
+src/lib/sealPixels.ts      像素算法（纯函数、可单测）：判真 alpha、纸/墨调色板、反预乘
+src/lib/png.ts             自写极简 PNG 编码器（透明区颜色由我们说了算）
+src/lib/sealStore.ts       印章库：IndexedDB 持久化、内容指纹去重、LRU 淘汰
 src/lib/geometry.ts        摆放决策：预设位置、默认位置、夹紧
 src/state/reducer.ts       纯 reducer（可单测）：撤销栈语义都在这里
 src/state/useStampTool.ts  把上面这些接成 React hook

@@ -30,6 +30,13 @@ export interface ExportOptions {
    * 只适合脚本/测试单独调用导出层时兜底。
    */
   frames?: PageFrame[];
+  /**
+   * 嵌入前对 PNG 字节做一次规范化（可选）。导出侧注入 seal.reencodeSealPng：
+   * 印章库里可能存着历史版本的字节（canvas 编的，透明区是纯黑），
+   * 不重编一遍，老章导出后仍会在忽略 /SMask 的阅读器里显示成黑框。
+   * 测试里不传，保持导出层与 DOM 无关。
+   */
+  prepareImage?: (pngBytes: Uint8Array) => Promise<Uint8Array>;
 }
 
 /** 载入待盖章的文档。加密文件在这里抛错，由调用方翻译成中文提示。 */
@@ -99,7 +106,7 @@ export async function stampDocument(
   stamps: Stamp[],
   opts: ExportOptions = {},
 ): Promise<Uint8Array> {
-  const { minOpacity = 0.01, frames } = opts;
+  const { minOpacity = 0.01, frames, prepareImage } = opts;
 
   // 按原始 PNG 字节去重，同一枚印章在多页复用只嵌入一次
   const embedded = new Map<string, Awaited<ReturnType<typeof pdfDoc.embedPng>>>();
@@ -107,7 +114,8 @@ export async function stampDocument(
     if (stamp.opacity < minOpacity) continue;
     const key = keyOf(stamp.pngBytes);
     if (embedded.has(key)) continue;
-    embedded.set(key, await pdfDoc.embedPng(stamp.pngBytes));
+    const bytes = prepareImage ? await prepareImage(stamp.pngBytes) : stamp.pngBytes;
+    embedded.set(key, await pdfDoc.embedPng(bytes));
   }
 
   for (const stamp of stamps) {

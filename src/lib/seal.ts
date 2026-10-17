@@ -1,6 +1,8 @@
 import type { SealImage } from './types';
+import { encodePngRgba } from './png';
 import { DPI_WARN, effectiveDpi } from './units';
 import {
+  bleachTransparent,
   estimatePalette,
   hasRealAlpha,
   inkBounds,
@@ -25,6 +27,13 @@ import {
  *    这时绝不能相信源 alpha——半透明的墨会让合同上的字透上来，
  *    看起来就是「重影」。改走 sealPixels.removePaperBackground()：
  *    按颜色反推墨量当 alpha，并把颜色反预乘回实心墨色。
+ *
+ * 4) 【后补】**透明区的颜色**。canvas 按预乘 alpha 存像素，α=0 一律是
+ *    (0,0,0)——于是 canvas 编出来的 PNG 透明区是纯黑，导出的 PDF 里那块
+ *    颜色也就是黑的。规范阅读器按 /SMask 合成、看不见它；**忽略 /SMask 的
+ *    阅读器会把它当实色画出来**，就是「预览正常、导出后印章周围一圈黑框」。
+ *    所以 PNG 改由 png.ts 自己编码（透明区在 sealPixels.bleachTransparent
+ *    里刷成白），不再走 canvas.toBlob。
  */
 
 export interface SealProcessOptions {
@@ -47,16 +56,9 @@ const loadImage = (url: string) =>
     img.src = url;
   });
 
-const toPngBytes = (canvas: HTMLCanvasElement) =>
-  new Promise<Uint8Array>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) return reject(new Error('PNG 编码失败'));
-      blob.arrayBuffer().then((ab) => resolve(new Uint8Array(ab)), reject);
-    }, 'image/png');
-  });
-
 export interface SealProcessResult {
-  canvas: HTMLCanvasElement;
+  /** 处理后的 RGBA 像素：已裁剪、透明区已漂白。PNG 由它编码（见 png.ts）。 */
+  data: Uint8ClampedArray;
   cropW: number;
   cropH: number;
   /** 被去掉的白边像素占非透明像素的比例 */
@@ -99,6 +101,10 @@ export function processSealPixels(
       fringeRatio = removeWhiteFringe(d, fringeThreshold);
     }
   }
+  // 透明区的颜色统一漂白：合规渲染器看不见它，忽略 /SMask 的渲染器
+  // 会把它当实色画出来（透明区通常是 (0,0,0) → 印章周围一圈黑框）。
+  // 必须在 putImageData 之前改，且对上面三条分支都生效。
+  bleachTransparent(d);
   fctx.putImageData(img, 0, 0);
 
   const bounds = inkBounds(d, srcW, srcH, padding);
@@ -106,7 +112,7 @@ export function processSealPixels(
   // 整张图都是白边 → 图像不透明，退回原图由用户自行处理
   if (!bounds) {
     return {
-      canvas: full,
+      data: d,
       cropW: srcW,
       cropH: srcH,
       fringeRatio: bgMode === 'paper' ? 0 : 1,
@@ -118,17 +124,18 @@ export function processSealPixels(
   const { x, y, w, h } = bounds;
   const trimmed = !(x === 0 && y === 0 && w === srcW && h === srcH);
   if (!trimmed) {
-    return { canvas: full, cropW: srcW, cropH: srcH, fringeRatio, trimmed: false, bgMode };
+    return { data: d, cropW: srcW, cropH: srcH, fringeRatio, trimmed: false, bgMode };
   }
 
-  const out = document.createElement('canvas');
-  out.width = w;
-  out.height = h;
-  const octx = out.getContext('2d');
-  if (!octx) throw new Error('无法创建 2D 绘图上下文');
-  octx.drawImage(full, x, y, w, h, 0, 0, w, h);
+  // 裁剪直接在像素数组上切，不再过一次 canvas——否则画布会把颜色重新预乘，
+  // 刚漂白的透明区又变回黑的。
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let row = 0; row < h; row++) {
+    const from = ((y + row) * srcW + x) * 4;
+    out.set(d.subarray(from, from + w * 4), row * w * 4);
+  }
 
-  return { canvas: out, cropW: w, cropH: h, fringeRatio, trimmed, bgMode };
+  return { data: out, cropW: w, cropH: h, fringeRatio, trimmed, bgMode };
 }
 
 /** 读取文件 → 预处理 → 得到可直接用于预览与嵌入的印章。 */
@@ -153,12 +160,12 @@ export async function loadSealFile(
   const srcH = img.naturalHeight;
   if (!srcW || !srcH) throw new Error('印章图片尺寸无效');
 
-  const { canvas, cropW, cropH, fringeRatio, trimmed, bgMode } = processSealPixels(
+  const { data, cropW, cropH, fringeRatio, trimmed, bgMode } = processSealPixels(
     img, srcW, srcH, opts,
   );
   URL.revokeObjectURL(rawUrl);
 
-  const pngBytes = await toPngBytes(canvas);
+  const pngBytes = await encodePngRgba(data, cropW, cropH);
   const objectUrl = URL.createObjectURL(
     new Blob([pngBytes as BlobPart], { type: 'image/png' }),
   );
@@ -178,6 +185,23 @@ export async function loadSealFile(
     dpiScale: srcW / cropW,
     bgMode,
   };
+}
+
+/**
+ * 把一枚**已经存在的**印章 PNG 重新编码一遍（透明的部分刷白）。
+ *
+ * 用在导出前：印章库里存的字节是历史版本（canvas 编的，透明区是黑的），
+ * 老章不重新过一遍就还是黑框。走的就是导入时那条像素链，是幂等的。
+ */
+export async function reencodeSealPng(pngBytes: Uint8Array): Promise<Uint8Array> {
+  const url = URL.createObjectURL(new Blob([pngBytes as BlobPart], { type: 'image/png' }));
+  try {
+    const img = await loadImage(url);
+    const { data, cropW, cropH } = processSealPixels(img, img.naturalWidth, img.naturalHeight);
+    return await encodePngRgba(data, cropW, cropH);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 export interface SealQuality {

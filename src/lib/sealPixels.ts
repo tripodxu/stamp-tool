@@ -203,6 +203,39 @@ export function removeWhiteFringe(data: Uint8ClampedArray, threshold = 245): num
   return opaque > 0 ? fringe / opaque : 0;
 }
 
+/**
+ * 把「全透明」像素的颜色漂白（默认白）。返回被改动的像素数。
+ *
+ * 存在的理由是一个**渲染器兼容性**问题，不是审美问题：透明 PNG 的透明区
+ * 通常留着 (0,0,0) 纯黑，这块颜色会被原样嵌进导出的 PDF（透明度走 /SMask）。
+ * 规范渲染器按软掩膜合成、颜色根本不参与，看起来毫无问题；但**忽略 /SMask
+ * 的渲染器会把它当实色画出来**——于是印章周围多出一个黑色方块，
+ * 用户看到的就是「导出后章有个黑框」，而预览（pdf.js）一切正常。
+ *
+ * 漂白之后：合规渲染器完全不受影响（α=0 的颜色本就不可见），
+ * 不合规的渲染器画出白底，落在白纸上等于看不见。
+ *
+ * 只动 α===0 的像素。α∈(1,254) 的软边颜色是**未预乘**的真实墨色，
+ * 改它会破坏边缘。
+ */
+export function bleachTransparent(
+  data: Uint8ClampedArray,
+  r = 255,
+  g = 255,
+  b = 255,
+): number {
+  let n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] !== 0) continue;
+    if (data[i] === r && data[i + 1] === g && data[i + 2] === b) continue;
+    data[i] = r;
+    data[i + 1] = g;
+    data[i + 2] = b;
+    n++;
+  }
+  return n;
+}
+
 /** alpha>0 像素的包围盒（含 padding）。整张图全透明时返回 null。 */
 export function inkBounds(
   data: Uint8ClampedArray,

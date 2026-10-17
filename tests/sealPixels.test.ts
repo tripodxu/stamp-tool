@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bleachTransparent,
   estimatePalette,
   hasRealAlpha,
   inkBounds,
@@ -170,5 +171,74 @@ describe('规范透明 PNG 的老路线不受影响', () => {
 
   it('全透明图返回 null', () => {
     expect(inkBounds(new Uint8ClampedArray(W * H * 4), W, H, 2)).toBeNull();
+  });
+});
+
+/**
+ * 回归：「预览正常，导出后印章周围有一圈黑框」。
+ *
+ * 透明 PNG 的透明区通常留着 (0,0,0)，这块颜色会被原样嵌进 PDF（透明度走 /SMask）。
+ * 规范渲染器按软掩膜合成、看不见它；忽略 /SMask 的渲染器把它当实色画出来，
+ * 就成了黑框。修法是只把 α=0 的像素漂白。
+ */
+describe('bleachTransparent：透明区漂白', () => {
+  it('α=0 的黑像素被刷成白，并返回改动数量', () => {
+    // 底色先铺成不透明的墨，免得零初始化的像素被当成透明区一起数进去
+    const d = new Uint8ClampedArray(4 * 4 * 4);
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = 230; d[i + 1] = 0; d[i + 2] = 18; d[i + 3] = 255;
+    }
+    const put = (i: number, r: number, g: number, b: number, a: number) => {
+      d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = a;
+    };
+    put(0, 0, 0, 0, 0);        // 透明区的黑 → 漂白
+    put(1, 0, 0, 0, 255);      // 不透明的黑（真的墨）→ 绝不动
+    expect(bleachTransparent(d)).toBe(1);
+    expect(at(d, 0, 0)).toEqual({ r: 255, g: 255, b: 255, a: 0 });
+    expect(at(d, 1, 0)).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+  });
+
+  it('只动全透明像素：软边（未预乘的真实墨色）一个字节都不改，alpha 也不变', () => {
+    const d = photoLike();
+    removePaperBackground(d, estimatePalette(d));
+    const before = Uint8ClampedArray.from(d);
+
+    const n = bleachTransparent(d);
+    expect(n, '纸底确实被漂白了').toBeGreaterThan(0);
+
+    let semiTouched = 0;
+    let opaqueTouched = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      expect(d[i + 3]).toBe(before[i + 3]);
+      if (d[i + 3] === 0) continue;
+      if (d[i] !== before[i] || d[i + 1] !== before[i + 1] || d[i + 2] !== before[i + 2]) {
+        if (before[i + 3] < 255) semiTouched++;
+        else opaqueTouched++;
+      }
+    }
+    expect(semiTouched).toBe(0);
+    expect(opaqueTouched).toBe(0);
+  });
+
+  it('整条处理链之后透明像素一律纯白（PDF 里是白底而不是黑底）', () => {
+    const d = photoLike({ alpha: 128 });
+    removePaperBackground(d, estimatePalette(d));
+    bleachTransparent(d);
+
+    let transparent = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] !== 0) continue;
+      transparent++;
+      expect([d[i], d[i + 1], d[i + 2]]).toEqual([255, 255, 255]);
+    }
+    expect(transparent).toBeGreaterThan(0);
+  });
+
+  it('本来就是白的透明像素不计入返回值（只数真正改动的）', () => {
+    const d = new Uint8ClampedArray(4 * 2 * 4);
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = 255; d[i + 1] = 255; d[i + 2] = 255; d[i + 3] = 0;
+    }
+    expect(bleachTransparent(d)).toBe(0);
   });
 });

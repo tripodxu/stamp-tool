@@ -16,6 +16,11 @@ exe」。反过来，直接在 exe 字节里 grep 特征串也不可靠（嵌入
 import json
 import re
 import sys
+import time
+# Windows 控制台默认 GBK，直接打 ✓/✗ 会 UnicodeEncodeError；统一改成 UTF-8。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -69,16 +74,27 @@ def main() -> int:
             print("FAIL 调试端口连不上（多半有残留实例占着 WebView2 用户数据目录）")
             return 1
         ws = WS(tgt["webSocketDebuggerUrl"])
-        r = ws.call("Runtime.evaluate", {"expression": EVAL, "returnByValue": True})
-        info = json.loads(r["result"]["value"])
+        # 调试端口在 React 渲染之前就开着了，必须轮询等界面画出来，
+        # 否则会把「还没渲染」误判成「exe 太旧、工具栏没有构建时间」。
+        info = {}
+        deadline = time.time() + 30
+        while True:
+            r = ws.call("Runtime.evaluate", {"expression": EVAL, "returnByValue": True})
+            info = json.loads(r["result"]["value"])
+            if (info["build"] and info["viewport"]) or time.time() > deadline:
+                break
+            time.sleep(0.5)
         ws.close()
     finally:
         proc.kill()
         proc.wait(timeout=10)
 
     print(f"界面构建   {info['raw']!r}  印章库 {info['lib']} 枚")
+    if not info["viewport"]:
+        print("FAIL 30 秒内没渲染出视图区：启动失败，或有残留实例占着 WebView2 用户数据目录")
+        return 1
     if not info["build"]:
-        print("FAIL 工具栏里没有构建时间——这个 exe 太旧了（早于防呆改动），必须重打")
+        print("FAIL 界面正常但工具栏里没有构建时间——这个 exe 早于防呆改动，必须重打")
         return 1
 
     build_t = datetime.strptime(info["build"], "%Y-%m-%d %H:%M")

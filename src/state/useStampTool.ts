@@ -7,7 +7,7 @@ import {
   openPdfDoc,
   stampDocument,
 } from '../lib/exporter';
-import { loadSealFile } from '../lib/seal';
+import { loadSealFile, reencodeSealPng } from '../lib/seal';
 import { mmToPt, STANDARD_SEAL_MM } from '../lib/units';
 import { defaultOpacity, defaultPlacement, presetPatch, type StampPreset } from '../lib/geometry';
 import { revokeAllPngUrls } from '../lib/pngCache';
@@ -283,7 +283,12 @@ export function useStampTool() {
 
       // frames 必须是预览用的那一份页面几何（含 /Rotate、裁切框、UserUnit），
       // 用 pdf-lib 自己的 getSize() 会在旋转页上把章盖偏几十毫米。
-      const out = await stampDocument(doc, stamps, { frames: pages });
+      // 顺便把老印章库里 canvas 编出来的字节重编一遍：透明区不刷白，
+      // 在忽略 /SMask 的阅读器里章外面会有一圈黑框。
+      const out = await stampDocument(doc, stamps, {
+        frames: pages,
+        prepareImage: reencodeSealPng,
+      });
       const base = docFileName.replace(/\.pdf$/i, '');
       const fileName = `${base}-已盖章.pdf`;
       downloadBlob(out, fileName);

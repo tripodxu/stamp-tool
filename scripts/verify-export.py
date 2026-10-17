@@ -9,6 +9,10 @@
 不传参数时只跑结构性检查。
 """
 import sys
+# Windows 控制台默认 GBK，直接打 ✓/✗ 会 UnicodeEncodeError；统一改成 UTF-8。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent

@@ -5,6 +5,10 @@
 （生成夹具时用的是同一套规则），映射抄错、/Rotate 方向搞反都会当场暴露。
 """
 import sys
+# Windows 控制台默认 GBK，直接打 ✓/✗ 会 UnicodeEncodeError；统一改成 UTF-8。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from pathlib import Path
 
 import pymupdf
