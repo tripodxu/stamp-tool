@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"默认能力集：不授予任何额外权限。应用不需要文件系统、Shell 或网络权限——所有处理都在本地 WebView 内完成。","local":true,"windows":["main"],"permissions":["core:default"]}}

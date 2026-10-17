@@ -1,0 +1,661 @@
+:root {
+  --bg: #eceef2;
+  --surface: #ffffff;
+  --line: #d9dde5;
+  --text: #1c2027;
+  --muted: #6b7280;
+  --accent: #b4232a;
+  --accent-soft: #fdecec;
+  --ok: #157347;
+  --warn: #a15c00;
+  --bad: #b4232a;
+  --radius: 8px;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  font-size: 14px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---------- 工具栏 ---------- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.toolbar .group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+.toolbar .count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.toolbar .build {
+  color: #9aa1ad;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar .pager span,
+.toolbar .zoom span {
+  min-width: 62px;
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+button:hover:not(:disabled) {
+  border-color: #b9c0cc;
+  background: #f6f7f9;
+}
+
+button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #9d1e24;
+  border-color: #9d1e24;
+}
+
+button.danger {
+  color: var(--bad);
+  border-color: #eccdd0;
+  background: var(--accent-soft);
+  width: 100%;
+  margin-top: 14px;
+}
+
+/* ---------- 提示条 ---------- */
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 16px;
+  font-size: 13px;
+}
+
+.banner.error {
+  background: var(--accent-soft);
+  color: var(--bad);
+  border-bottom: 1px solid #eccdd0;
+}
+
+.banner.busy {
+  background: #eef4ff;
+  color: #1d4ed8;
+  border-bottom: 1px solid #cfdefb;
+}
+
+/* 导出成功：绿色，和错误态区分开 */
+.banner.done {
+  background: #e9f7ef;
+  color: #14733c;
+  border-bottom: 1px solid #bfe3cd;
+  font-weight: 600;
+}
+
+/* ---------- 主区 ---------- */
+.main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.viewport {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 28px;
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty h1 {
+  color: var(--text);
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+
+.page-wrap {
+  padding: 0 auto;
+}
+
+/* ---------- 页面舞台 ---------- */
+.page-stage {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 2px 16px rgba(20, 25, 35, 0.16);
+  flex: none;
+}
+
+.page-canvas {
+  display: block;
+}
+
+.page-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--bad);
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+}
+
+/* 印章层：坐标系 = PDF point，与页面舞台同原点，缩放交给 CSS */
+.stamp-layer {
+  position: absolute;
+  inset: 0;
+  transform-origin: top left;
+  pointer-events: none;
+}
+
+.stamp-layer > * {
+  pointer-events: auto;
+}
+
+/* ---------- 印章框 ---------- */
+.stamp-box {
+  position: absolute;
+  transform-origin: center center;
+  cursor: grab;
+  touch-action: none;
+}
+
+.stamp-box:active {
+  cursor: grabbing;
+}
+
+.stamp-box img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 选中框与手柄都长在 .stamp-layer 的 scale(zoom) 里，一律按 1/zoom 反缩放，
+   这样它们在屏幕上的尺寸恒定。否则 25% 缩放下 18px 手柄只剩 4.5px 根本点不中，
+   400% 时又胀成 72px。 */
+.stamp-box.is-selected {
+  outline: dashed var(--accent);
+  outline-width: calc(1.5px / var(--zoom, 1));
+  outline-offset: calc(3px / var(--zoom, 1));
+}
+
+/* 18px：12px 的圆点在高 DPI 屏和手指操作下几乎点不中 */
+.stamp-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  cursor: nwse-resize;
+  transform: scale(calc(1 / var(--zoom, 1)));
+}
+
+.stamp-handle-se {
+  right: calc(-9px / var(--zoom, 1));
+  bottom: calc(-9px / var(--zoom, 1));
+}
+
+/* 旋转手柄：挂在印章正上方，跟着章一起转，手感与图形编辑器一致 */
+.stamp-rot {
+  position: absolute;
+  top: calc(-36px / var(--zoom, 1));
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  margin-left: calc(-9px / var(--zoom, 1));
+  transform: scale(calc(1 / var(--zoom, 1)));
+  background: #fff;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(20, 25, 35, 0.25);
+  cursor: grab;
+  touch-action: none;
+}
+
+/* 手柄与章之间的小连线，暗示「它连着章」 */
+.stamp-rot::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 1.5px;
+  height: 19px;
+  margin-left: -0.75px;
+  background: var(--accent);
+}
+
+.stamp-rot:active {
+  cursor: grabbing;
+}
+
+.stamp-delete {
+  position: absolute;
+  top: calc(-14px / var(--zoom, 1));
+  right: calc(-14px / var(--zoom, 1));
+  width: 28px;
+  height: 28px;
+  transform: scale(calc(1 / var(--zoom, 1)));
+  padding: 0;
+  line-height: 1;
+  font-size: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.stamp-delete:hover:not(:disabled) {
+  background: #9d1e24;
+}
+
+/* ---------- 侧栏 ---------- */
+.panel {
+  width: 300px;
+  flex: none;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  padding: 18px 16px;
+  overflow: auto;
+}
+
+.panel h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  line-height: 2;
+  font-size: 13px;
+}
+
+.note {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.seal-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: #f8f9fb;
+  display: grid;
+  place-items: center;
+  margin-bottom: 14px;
+}
+
+.seal-preview img {
+  max-width: 100%;
+  max-height: 130px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+
+.kv dt {
+  color: var(--muted);
+}
+
+.kv dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.checks li::before {
+  content: "· ";
+}
+
+.checks .ok {
+  color: var(--ok);
+}
+.checks .warn {
+  color: var(--warn);
+}
+.checks .muted {
+  color: var(--muted);
+}
+
+.field {
+  display: block;
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+
+.field > span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.field b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.field input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.quick-sizes {
+  display: flex;
+  gap: 6px;
+  margin: -6px 0 16px;
+}
+
+.chip {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 12px;
+}
+
+.chip.active {
+  background: var(--accent-soft);
+  border-color: #e3b4b7;
+  color: var(--accent);
+}
+
+.quality {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.q-good {
+  background: #eaf5ef;
+  color: var(--ok);
+}
+.q-warn {
+  background: #fdf4e7;
+  color: var(--warn);
+}
+.q-bad {
+  background: var(--accent-soft);
+  color: var(--bad);
+}
+
+/* ---------- 签名警告 ---------- */
+/* 覆盖已签名 PDF 是破坏性的，所以用琥珀色提醒 + 必须二次确认 */
+.banner.warn {
+  background: #fdf4e7;
+  color: var(--warn);
+  border-bottom: 1px solid #f0dcb5;
+  font-weight: 600;
+}
+
+.banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- 拖放上传 ---------- */
+.viewport.is-dropping {
+  outline: 2px dashed var(--accent);
+  outline-offset: -10px;
+  background: var(--accent-soft);
+}
+
+/* ---------- 位置输入 ---------- */
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0 8px;
+}
+
+.xy-inputs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.xy-inputs label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.xy-inputs input {
+  width: 100%;
+  font: inherit;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.xy-inputs input:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+button.ghost {
+  width: 100%;
+  margin-top: 10px;
+  background: transparent;
+  border-style: dashed;
+}
+/* ---------- 印章库 ---------- */
+.seal-lib {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.seal-lib .lib-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-btn:hover:not(:disabled) {
+  background: none;
+  border: none;
+  color: var(--accent);
+}
+
+.note-inline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.seal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.seal-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.seal-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.seal-list li.active .seal-item {
+  border-color: #e3b4b7;
+  background: var(--accent-soft);
+}
+
+.seal-item img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  flex: none;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.seal-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.seal-name {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seal-sub {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.seal-badge {
+  flex: none;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid #e3b4b7;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.seal-del {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  line-height: 1;
+  font-size: 15px;
+  color: var(--muted);
+  border-radius: 6px;
+}
+
+.seal-del:hover:not(:disabled) {
+  color: var(--bad);
+  border-color: #eccdd0;
+  background: var(--accent-soft);
+}
+

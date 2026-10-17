@@ -1,0 +1,26 @@
+[package]
+name = "stamp-tool"
+version = "0.1.0"
+description = "PDF 公章盖章工具"
+edition = "2021"
+rust-version = "1.77"
+
+# 桌面端只需要一个轻量壳：所有逻辑都在前端，Rust 侧不含任何业务代码，
+# 因此这里刻意不引入任何 Tauri 插件，保持二进制体积最小。
+[lib]
+name = "stamp_tool_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+# 目标是一个约 10MB 的单文件 exe
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

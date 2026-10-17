@@ -1,0 +1,7 @@
+# 端到端 / 像素级校验脚本的依赖
+#   pip install -r scripts/requirements.txt
+pymupdf>=1.24
+pypdf>=4
+Pillow>=10
+# make-fixtures.py（生成 test-doc.pdf 与印章样张）额外需要：
+reportlab>=4
