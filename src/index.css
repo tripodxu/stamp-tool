@@ -40,10 +40,11 @@ body {
 .toolbar {
   display: flex;
   align-items: center;
-  /* 列间距 10px 是量出来的：默认窗口 1280 逻辑像素下，14px 会把导出挤到第二行 */
-  gap: 10px;
+  /* 8px 是量出来的：默认窗口 1280 逻辑像素下，要放下「有章 (N)」+ 构建时间 + 导出，
+     间距再宽一点导出就会掉到第二行（见 README「操作手感」那一节） */
+  gap: 7px;
   row-gap: 6px;
-  padding: 10px 16px;
+  padding: 10px 14px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
@@ -60,7 +61,14 @@ body {
 .toolbar .group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+}
+
+/* 工具栏里的按钮窄一点：11 个按钮各收 6px，正好把 1280 宽下的导出留在第一行
+   （留出约 25px 余量，字体度量差一点点也不会突然换行） */
+.toolbar button {
+  padding-left: 9px;
+  padding-right: 9px;
 }
 
 .toolbar .spacer {
@@ -72,9 +80,6 @@ body {
    而不是孤零零留在左边像是排版坏了 */
 .toolbar .count {
   margin-left: auto;
-}
-
-.toolbar .count {
   color: var(--muted);
   font-size: 13px;
 }
@@ -87,7 +92,7 @@ body {
 
 .toolbar .pager span,
 .toolbar .zoom span {
-  min-width: 62px;
+  min-width: 52px;
   text-align: center;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -122,7 +127,64 @@ body {
 }
 
 .pager-menu-btn {
-  margin-left: 4px;
+  margin-left: 0;
+}
+
+/* 小方形图标按钮（? 快捷键） */
+.icon-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin-left: 0;
+  line-height: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.icon-btn:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+/* 快捷键浮层：左键名右说明。
+   两个类名是为了压过后面 .pager-menu-list 的 min-width（同权重时后面的赢） */
+.pager-menu-list.keys-menu {
+  left: 0;
+  right: auto;
+  min-width: 320px;
+  padding: 6px;
+}
+
+.keys-menu li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 8px;
+}
+
+.key-name {
+  flex: none;
+  min-width: 132px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.key-desc {
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* 「盖到…」：页码范围 + 按钮 */
+.range-row {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+
+.page-range-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .pager-menu-list {
@@ -648,6 +710,12 @@ button.ghost {
   margin-bottom: 10px;
 }
 
+/* 「清理重复 / 清空」并排，别让两个 link 挤成一行看不清 */
+.lib-actions {
+  display: flex;
+  gap: 12px;
+}
+
 .link-btn {
   padding: 0;
   border: none;
@@ -686,14 +754,13 @@ button.ghost {
   gap: 4px;
 }
 
+/* 缩略图本身就是按钮：名字/时间在按钮外，改名输入框才不会嵌在按钮里 */
 .seal-item {
-  flex: 1;
-  min-width: 0;
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 8px;
-  text-align: left;
+  justify-content: center;
+  padding: 3px;
 }
 
 .seal-list li.active .seal-item {
@@ -712,13 +779,24 @@ button.ghost {
 }
 
 .seal-meta {
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+.seal-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .seal-name {
+  flex: 1;
+  cursor: text;
+
   font-size: 12px;
   color: var(--text);
   overflow: hidden;
@@ -732,9 +810,15 @@ button.ghost {
   font-variant-numeric: tabular-nums;
 }
 
+.seal-name-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 1px 4px;
+}
+
 .seal-badge {
   flex: none;
-  margin-left: auto;
   font-size: 10px;
   color: var(--accent);
   border: 1px solid #e3b4b7;

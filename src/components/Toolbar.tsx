@@ -28,30 +28,47 @@ interface Props {
   onBatch: () => void;
 }
 
+/** 界面上没写、但确实做了的键。放着不说 = 白做，所以列出来。 */
+const SHORTCUTS: [string, string][] = [
+  ['Ctrl+Z', '撤销'],
+  ['Ctrl+Shift+Z', '重做'],
+  ['Ctrl+E', '导出 PDF'],
+  ['Ctrl+D', '复制选中的印章'],
+  ['Delete', '删除选中的印章'],
+  ['↑ ↓ ← →', '微调位置 1mm（按住 Shift = 10mm）'],
+  ['PageUp / PageDown', '上一页 / 下一页'],
+  ['Home / End', '第一页 / 最后一页'],
+  ['Esc', '取消选中'],
+  ['双击印章库里的名字', '给这枚章改名'],
+];
+
 export function Toolbar(p: Props) {
   const pdfRef = useRef<HTMLInputElement>(null);
   const sealRef = useRef<HTMLInputElement>(null);
   /** 页码输入框里正在敲的内容；null 表示跟随当前页 */
   const [pageDraft, setPageDraft] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  /** 工具栏上的三个下拉同一时刻只开一个 */
+  const [menu, setMenu] = useState<'pager' | 'export' | 'keys' | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   /** 「导出」旁边的下拉：主按钮还是导出到「下载」，另存为是备选 */
-  const [exportMenu, setExportMenu] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+  const keysRef = useRef<HTMLDivElement>(null);
 
   // 点别处 / 按 Esc 关掉下拉菜单
   useEffect(() => {
-    if (!menuOpen && !exportMenu) return;
+    if (!menu) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (!menuRef.current?.contains(t)) setMenuOpen(false);
-      if (!exportRef.current?.contains(t)) setExportMenu(false);
+      const host =
+        menu === 'pager'
+          ? menuRef.current
+          : menu === 'export'
+            ? exportRef.current
+            : keysRef.current;
+      if (!host?.contains(t)) setMenu(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setMenuOpen(false);
-        setExportMenu(false);
-      }
+      if (e.key === 'Escape') setMenu(null);
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -59,7 +76,7 @@ export function Toolbar(p: Props) {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [menuOpen, exportMenu]);
+  }, [menu]);
 
   // 换页（或页数变了）就丢掉草稿，别让输入框停在旧值上
   useEffect(() => setPageDraft(null), [p.page, p.pageCount]);
@@ -102,6 +119,27 @@ export function Toolbar(p: Props) {
         <button onClick={p.onRedo} disabled={!p.canRedo} title="重做 (Ctrl+Shift+Z)">
           重做
         </button>
+        <div className="pager-menu" ref={keysRef}>
+          <button
+            className="icon-btn"
+            aria-haspopup="menu"
+            aria-expanded={menu === 'keys'}
+            title="键盘快捷键"
+            onClick={() => setMenu(menu === 'keys' ? null : 'keys')}
+          >
+            ?
+          </button>
+          {menu === 'keys' && (
+            <ul className="pager-menu-list keys-menu" role="menu">
+              {SHORTCUTS.map(([k, d]) => (
+                <li key={k}>
+                  <span className="key-name">{k}</span>
+                  <span className="key-desc">{d}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       {p.hasDoc && p.pageCount > 1 && (
@@ -147,13 +185,13 @@ export function Toolbar(p: Props) {
               <button
                 className="pager-menu-btn"
                 aria-haspopup="listbox"
-                aria-expanded={menuOpen}
+                aria-expanded={menu === 'pager'}
                 title="跳到盖了章的页"
-                onClick={() => setMenuOpen((v) => !v)}
+                onClick={() => setMenu(menu === 'pager' ? null : 'pager')}
               >
                 有章 ({p.stampPages.length})
               </button>
-              {menuOpen && (
+              {menu === 'pager' && (
                 <ul className="pager-menu-list" role="listbox">
                   {p.stampPages.map((idx) => (
                     <li key={idx}>
@@ -162,7 +200,7 @@ export function Toolbar(p: Props) {
                         aria-selected={idx === p.page}
                         className={idx === p.page ? 'is-current' : undefined}
                         onClick={() => {
-                          setMenuOpen(false);
+                          setMenu(null);
                           p.onJumpToPage(idx);
                         }}
                       >
@@ -207,21 +245,21 @@ export function Toolbar(p: Props) {
         </button>
         <button
           className="export-caret"
-          onClick={() => setExportMenu((v) => !v)}
+          onClick={() => setMenu(menu === 'export' ? null : 'export')}
           disabled={!p.hasDoc || p.stampCount === 0 || p.busy}
           title="更多导出方式"
           aria-haspopup="menu"
-          aria-expanded={exportMenu}
+          aria-expanded={menu === 'export'}
         >
           ▾
         </button>
-        {exportMenu && (
+        {menu === 'export' && (
           <ul className="pager-menu-list export-menu" role="menu">
             <li>
               <button
                 role="menuitem"
                 onClick={() => {
-                  setExportMenu(false);
+                  setMenu(null);
                   p.onExportAs();
                 }}
               >

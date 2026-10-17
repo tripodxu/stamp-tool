@@ -236,6 +236,27 @@ export function bleachTransparent(
   return n;
 }
 
+/**
+ * 两枚印章的墨迹是不是同一份（去重用）。
+ *
+ * 逐像素比 alpha，并且在 alpha>0 处比颜色；**唯独放行全透明像素的颜色差异**。
+ * 这正是「同一张图被两种编码器写过」的样子：canvas 按预乘 alpha 存像素，
+ * 透明区一律写成 (0,0,0)；自写编码器把它刷成白（见 bleachTransparent）。
+ * 两份字节在视觉上完全一致（透明区看不见），却会让印章库里多出一条同名条目。
+ *
+ * 比较对象必须来自同一条解码路径（decodeSealPixels），否则预乘往返的
+ * 舍入会让「相同」的像素差 1~2 个数——那不叫重复，也不该被合并。
+ */
+export function sameInkPixels(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 4) {
+    if (a[i + 3] !== b[i + 3]) return false;
+    if (a[i + 3] === 0) continue;
+    if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) return false;
+  }
+  return true;
+}
+
 /** alpha>0 像素的包围盒（含 padding）。整张图全透明时返回 null。 */
 export function inkBounds(
   data: Uint8ClampedArray,

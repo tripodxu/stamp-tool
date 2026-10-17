@@ -1,5 +1,6 @@
 import type { SealImage } from './types';
 import { encodePngRgba } from './png';
+import { contentKey } from './sealStore';
 import { DPI_WARN, effectiveDpi } from './units';
 import {
   bleachTransparent,
@@ -170,9 +171,14 @@ export async function loadSealFile(
     new Blob([pngBytes as BlobPart], { type: 'image/png' }),
   );
 
+  // 印章库的 id 按**源文件**算：同一张原图重新导入就是同一条记录，
+  // 处理算法改过也一样（用处理后的字节做 id 会在库里留下两条同名印章）。
+  const sourceKey = contentKey(new Uint8Array(await file.arrayBuffer()));
+
   return {
     name: file.name,
     pngBytes,
+    sourceKey,
     objectUrl,
     srcW,
     srcH,
@@ -199,6 +205,27 @@ export async function reencodeSealPng(pngBytes: Uint8Array): Promise<Uint8Array>
     const img = await loadImage(url);
     const { data, cropW, cropH } = processSealPixels(img, img.naturalWidth, img.naturalHeight);
     return await encodePngRgba(data, cropW, cropH);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * 把一枚印章 PNG 解回 RGBA 像素（只用于比对，不做任何处理）。
+ *
+ * 与导出前那条重编码链无关：这里只想知道「两枚印章的墨是不是同一份」。
+ */
+export async function decodeSealPixels(pngBytes: Uint8Array): Promise<Uint8ClampedArray> {
+  const url = URL.createObjectURL(new Blob([pngBytes as BlobPart], { type: 'image/png' }));
+  try {
+    const img = await loadImage(url);
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('无法创建 2D 绘图上下文');
+    ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, c.width, c.height).data;
   } finally {
     URL.revokeObjectURL(url);
   }

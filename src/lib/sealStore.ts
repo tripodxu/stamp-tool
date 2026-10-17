@@ -1,4 +1,4 @@
-import type { SealImage } from './types';
+import type { SealDefaults, SealImage } from './types';
 
 /**
  * 印章库：把用户导入过的印章留在本地，下次打开直接点选，不用重新导入。
@@ -21,7 +21,7 @@ const STORE = 'seals';
 export const MAX_SEALS = 30;
 
 export interface SavedSeal {
-  /** 内容指纹：同一张图重复导入不会产生第二条 */
+  /** 记录指纹：优先按**源文件**字节（见 sealRecordId），重复导入会刷新同一条 */
   id: string;
   name: string;
   pngBytes: Uint8Array;
@@ -35,6 +35,10 @@ export interface SavedSeal {
   trimmed: boolean;
   dpiScale: number;
   bgMode: 'alpha' | 'paper';
+  /** 源文件字节的指纹（老记录没有这个字段，id 就是处理后的指纹） */
+  sourceKey?: string;
+  /** 这枚章的参数默认值：下次选用它时直接恢复上次调好的直径/角度/浓度 */
+  defaults?: SealDefaults;
   savedAt: number;
   lastUsedAt: number;
 }
@@ -47,6 +51,43 @@ export function contentKey(bytes: Uint8Array): string {
     h = Math.imul(h, 16777619);
   }
   return `${bytes.length.toString(36)}-${(h >>> 0).toString(36)}`;
+}
+
+/**
+ * 一条库记录的 id。
+ *
+ * 优先用**源文件**的指纹：同一张原图重新导入（哪怕处理算法改过）会命中同一条，
+ * 不会在库里堆出两条看起来一样的印章。老记录没有 sourceKey，退回处理后的指纹。
+ */
+export function sealRecordId(seal: Pick<SealImage, 'pngBytes' | 'sourceKey'>): string {
+  return seal.sourceKey ?? contentKey(seal.pngBytes);
+}
+
+/** 按 id 局部更新一条记录（改名、记住参数）。找不到就原样返回。 */
+export function patchSavedSeal(
+  list: SavedSeal[],
+  id: string,
+  patch: Partial<SavedSeal>,
+): SavedSeal[] {
+  if (!list.some((s) => s.id === id)) return list;
+  return list.map((s) => (s.id === id ? { ...s, ...patch } : s));
+}
+
+/**
+ * 按「已处理 PNG 的指纹」找回库里的那条记录。
+ *
+ * 画布上的章只知道自己嵌进去的字节（可能是老记录，id 按处理后指纹算的），
+ * 所以要把库里的每一条都算一遍指纹，不能拿 stamp 去和 id 直接比。
+ */
+export function findSealByInkKey(list: SavedSeal[], inkKey: string): SavedSeal | null {
+  return list.find((s) => contentKey(s.pngBytes) === inkKey) ?? null;
+}
+
+/** 「10-17 14:51」：同名印章靠导入时间分辨。 */
+export function formatSavedAt(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /** 最近**用过**的排前面：给「启动时自动选中」和淘汰策略用。 */
@@ -71,7 +112,7 @@ export function pickEvictions(list: SavedSeal[], max = MAX_SEALS): string[] {
 /** 由运行时印章生成库记录。 */
 export function toSavedSeal(seal: SealImage, now: number): SavedSeal {
   return {
-    id: contentKey(seal.pngBytes),
+    id: sealRecordId(seal),
     name: seal.name,
     pngBytes: seal.pngBytes,
     srcW: seal.srcW,
@@ -84,6 +125,8 @@ export function toSavedSeal(seal: SealImage, now: number): SavedSeal {
     trimmed: seal.trimmed,
     dpiScale: seal.dpiScale,
     bgMode: seal.bgMode,
+    sourceKey: seal.sourceKey,
+    defaults: seal.defaults,
     savedAt: now,
     lastUsedAt: now,
   };
@@ -105,6 +148,8 @@ export function toSealImage(saved: SavedSeal, objectUrl: string): SealImage {
     trimmed: saved.trimmed,
     dpiScale: saved.dpiScale,
     bgMode: saved.bgMode,
+    sourceKey: saved.sourceKey,
+    defaults: saved.defaults,
   };
 }
 

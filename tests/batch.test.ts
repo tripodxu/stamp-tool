@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   batchStamps,
+  fileKey,
+  isPdfFile,
   pageIndices,
   parsePageSpec,
+  pickNewPdfs,
   stampedName,
   zipName,
   type BatchSeed,
@@ -172,3 +175,34 @@ describe('命名', () => {
     expect(zipName(3, new Date(2026, 9, 17, 9, 5))).toBe('已盖章 3 份 20261017 0905.zip');
   });
 });
+
+describe('拖进来的文件先过一遍：fileKey / isPdfFile / pickNewPdfs', () => {
+  const f = (name: string, size = 1, lastModified = 1, type = '') =>
+    ({ name, size, lastModified, type }) as File;
+
+  it('fileKey 认名字+大小+时间：同名的两份不同文件不会被当成同一份', () => {
+    expect(fileKey(f('a.pdf', 10, 111))).toBe('a.pdf|10|111');
+    expect(fileKey(f('a.pdf', 10, 222))).not.toBe(fileKey(f('a.pdf', 10, 111)));
+  });
+
+  it('isPdfFile 认 MIME，也认扩展名（有些来源拖进来 type 是空的）', () => {
+    expect(isPdfFile(f('a.pdf'))).toBe(true);
+    expect(isPdfFile(f('a.PDF'))).toBe(true);
+    expect(isPdfFile(f('a.bin', 1, 1, 'application/pdf'))).toBe(true);
+    expect(isPdfFile(f('a.png', 1, 1, 'image/png'))).toBe(false);
+  });
+
+  it('pickNewPdfs 丢掉非 PDF，也丢掉清单里已有的（同一份拖两次不该出现两行）', () => {
+    const out = pickNewPdfs(
+      ['a.pdf|1|1'],
+      [f('a.pdf'), f('b.pdf', 2, 2), f('c.png', 3, 3, 'image/png')],
+    );
+    expect(out.map((x) => x.name)).toEqual(['b.pdf']);
+  });
+
+  it('没给已有清单时原样收下所有 PDF', () => {
+    const out = pickNewPdfs([], [f('a.pdf'), f('b.pdf', 2, 2)]);
+    expect(out).toHaveLength(2);
+  });
+});
+

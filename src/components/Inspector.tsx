@@ -4,7 +4,7 @@ import { mmToPt, ptToMm, STANDARD_SEAL_MM } from '../lib/units';
 import { assessSealQuality } from '../lib/seal';
 import { PRESET_LABELS, type StampPreset } from '../lib/geometry';
 import { SealLibrary } from './SealLibrary';
-import { contentKey, type SavedSeal } from '../lib/sealStore';
+import { sealRecordId, type SavedSeal } from '../lib/sealStore';
 
 interface Props {
   seal: SealImage | null;
@@ -17,9 +17,13 @@ interface Props {
   onBeginEdit: () => void;
   onApplyPreset: (id: string, kind: StampPreset) => void;
   onCopyAllPages: (id: string) => void;
+  /** 盖到指定页：'1,3,5-8' / '末页' / 留空＝全部 */
+  onStampOnPages: (id: string, spec: string) => void;
   onRemove: (id: string) => void;
   onUseSeal: (seal: SavedSeal) => void;
   onDeleteSeal: (id: string) => void;
+  onRenameSeal: (id: string, name: string) => void;
+  onDedupeSeals: () => void;
   onClearSeals: () => void;
 }
 
@@ -49,17 +53,24 @@ export function Inspector({
   onBeginEdit,
   onApplyPreset,
   onCopyAllPages,
+  onStampOnPages,
   onRemove,
   onUseSeal,
   onDeleteSeal,
+  onRenameSeal,
+  onDedupeSeals,
   onClearSeals,
 }: Props) {
+  /** 「盖到…」输入框里的页码，回车或点按钮才生效 */
+  const [range, setRange] = useState('');
   const library = (
     <SealLibrary
       seals={seals}
-      activeId={seal ? contentKey(seal.pngBytes) : null}
+      activeId={seal ? sealRecordId(seal) : null}
       onUse={onUseSeal}
       onDelete={onDeleteSeal}
+      onRename={onRenameSeal}
+      onDedupe={onDedupeSeals}
       onClear={onClearSeals}
     />
   );
@@ -251,6 +262,29 @@ export function Inspector({
           复制到全部 {pageCount} 页
         </button>
       )}
+
+      <div className="range-row">
+        <input
+          className="page-range-input"
+          value={range}
+          placeholder="1,3,5-8 或 末页"
+          title="把这枚章盖到这些页；留空＝全部页"
+          onChange={(e) => setRange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onStampOnPages(stamp.id, range);
+            }
+          }}
+        />
+        <button
+          className="ghost"
+          title="把这枚章按同样的位置与参数盖到这些页"
+          onClick={() => onStampOnPages(stamp.id, range)}
+        >
+          盖到…
+        </button>
+      </div>
 
       <button className="danger" onClick={() => onRemove(stamp.id)}>
         删除这枚印章

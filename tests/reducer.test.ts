@@ -9,6 +9,7 @@ import {
 } from '../src/state/reducer';
 import type { Stamp } from '../src/lib/types';
 import { toSavedSeal } from '../src/lib/sealStore';
+import { defaultSealDefaults } from '../src/lib/geometry';
 
 const mkStamp = (over: Partial<Stamp> = {}): Stamp => ({
   id: 's1',
@@ -234,4 +235,89 @@ describe('换文档确认（换文件会连撤销栈一起清，退不回来）'
     expect(s.pendingPdf).toBeNull();
   });
 });
+
+describe('印章库改名与「每枚章记住自己的参数」', () => {
+  const sealRec = (id: string, name: string) => {
+    const base = toSavedSeal(
+      {
+        name,
+        pngBytes: new Uint8Array([1, 2, 3]),
+        objectUrl: 'blob:x',
+        srcW: 10,
+        srcH: 10,
+        cropW: 10,
+        cropH: 10,
+        aspect: 1,
+        fringeRatio: 0,
+        dpiScale: 1,
+        hadFringe: false,
+        trimmed: true,
+        bgMode: 'alpha',
+      },
+      0,
+    );
+    return { ...base, id, name };
+  };
+
+  it('SEAL_PATCHED 改名，只动那一条', () => {
+    const withSeals = run([{ type: 'SEALS_LOADED', seals: [sealRec('a', '甲章.png'), sealRec('b', '乙章.png')] }]);
+    const out = reducer(withSeals, { type: 'SEAL_PATCHED', id: 'b', patch: { name: '合同章.png' } });
+    expect(out.seals.map((s) => s.name)).toEqual(['甲章.png', '合同章.png']);
+  });
+
+  it('SEAL_PATCHED 也能改默认参数（直径/角度/浓度）', () => {
+    const withSeals = run([{ type: 'SEALS_LOADED', seals: [sealRec('a', '甲章.png')] }]);
+    const out = reducer(withSeals, {
+      type: 'SEAL_PATCHED',
+      id: 'a',
+      patch: { defaults: { widthMm: 42, rotationDeg: -12, opacity: 0.6 } },
+    });
+    expect(out.seals[0].defaults).toEqual({ widthMm: 42, rotationDeg: -12, opacity: 0.6 });
+  });
+
+  it('SEAL_DEFAULTS 决定下一次「放置印章」的尺寸/角度/浓度', () => {
+    const out = reducer(initialState, {
+      type: 'SEAL_DEFAULTS',
+      defaults: { widthMm: 42, rotationDeg: 0, opacity: 1 },
+    });
+    expect(out.sealDefaults).toEqual({ widthMm: 42, rotationDeg: 0, opacity: 1 });
+  });
+
+  it('初始默认值：标准直径、−8°、透明底 85%', () => {
+    expect(initialState.sealDefaults.widthMm).toBeCloseTo(40, 5);
+    expect(initialState.sealDefaults.rotationDeg).toBe(-8);
+    expect(initialState.sealDefaults.opacity).toBeCloseTo(0.85, 5);
+  });
+
+  it('翻拍件（paper）的默认浓度是 1——照片自带浓淡，再压透明度就会透字', () => {
+    const out = reducer(initialState, {
+      type: 'SEAL_DEFAULTS',
+      defaults: defaultSealDefaults('paper'),
+    });
+    expect(out.sealDefaults.opacity).toBe(1);
+  });
+
+  it('同一枚章再次导入：改过的名字和记住的参数都不被文件名冲掉', () => {
+    let s = run([{ type: 'SEALS_LOADED', seals: [sealRec('a', '甲章.png')] }]);
+    s = reducer(s, {
+      type: 'SEAL_PATCHED',
+      id: 'a',
+      patch: { name: '合同专用章.png', defaults: { widthMm: 30, rotationDeg: 10, opacity: 0.7 } },
+    });
+    // 用户又拖了一次同一个文件：源文件指纹相同＝同一条记录，只刷新使用时间
+    s = reducer(s, { type: 'SEAL_SAVED', seal: { ...sealRec('a', '甲章.png'), lastUsedAt: 999 } });
+    expect(s.seals).toHaveLength(1);
+    expect(s.seals[0].name).toBe('合同专用章.png');
+    expect(s.seals[0].defaults).toEqual({ widthMm: 30, rotationDeg: 10, opacity: 0.7 });
+    expect(s.seals[0].lastUsedAt).toBe(999);
+  });
+
+  it('库里没有的章导入时，按文件带来的默认参数落库', () => {
+    const rec = { ...sealRec('new', '新章.png'), defaults: { widthMm: 42, rotationDeg: -8, opacity: 1 } };
+    const s = reducer(initialState, { type: 'SEAL_SAVED', seal: rec });
+    expect(s.seals[0].name).toBe('新章.png');
+    expect(s.seals[0].defaults).toEqual({ widthMm: 42, rotationDeg: -8, opacity: 1 });
+  });
+});
+
 

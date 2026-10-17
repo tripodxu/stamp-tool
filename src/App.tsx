@@ -4,14 +4,17 @@ import { Toolbar } from './components/Toolbar';
 import { PageCanvas } from './components/PageCanvas';
 import { Inspector } from './components/Inspector';
 import { BatchPanel } from './components/BatchPanel';
+import { isPdfFile } from './lib/batch';
 
 export default function App() {
   const tool = useStampTool();
   const { state, stats } = tool;
-  const { exportPdf, undo, redo, select, setPage } = tool;
+  const { exportPdf, undo, redo, select, setPage, removeStamp, duplicateStamp } = tool;
   const stampCount = state.stamps.length;
   const [dropping, setDropping] = useState(false);
   const [batching, setBatching] = useState(false);
+  /** 一次拖进多份 PDF 时，先把它们交给批量面板 */
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
 
   /**
    * 键盘监听要读「当前第几页」，但把 state 放进依赖数组会让监听每次渲染
@@ -19,6 +22,10 @@ export default function App() {
    */
   const stateRefPages = useRef({ page: state.currentPage, length: state.pages.length });
   stateRefPages.current = { page: state.currentPage, length: state.pages.length };
+
+  /** 同上：Delete / Ctrl+D 要知道选中的是哪一枚。 */
+  const stateRefSel = useRef<string | null>(state.selectedId);
+  stateRefSel.current = state.selectedId;
 
   // Ctrl+Z / Ctrl+Shift+Z / Ctrl+E
   // 依赖全部是稳定引用（useCallback），否则每次渲染都会解绑重绑监听
@@ -42,6 +49,18 @@ export default function App() {
       }
       // 翻页键：批量面板开着时它盖在文档上，这时不抢键
       if (batching) return;
+      // 删除 / 复制选中的章。Backspace 在没有选中项时留给浏览器，别劫持成「后退」
+      const sel = stateRefSel.current;
+      if (sel && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        removeStamp(sel);
+        return;
+      }
+      if (sel && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        duplicateStamp(sel);
+        return;
+      }
       const pageCount = stateRefPages.current.length;
       if (pageCount === 0) return;
       const cur = stateRefPages.current.page;
@@ -61,7 +80,18 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [exportPdf, redo, undo, select, setPage, stampCount, batching, stateRefPages]);
+  }, [
+    exportPdf,
+    redo,
+    undo,
+    select,
+    setPage,
+    removeStamp,
+    duplicateStamp,
+    stampCount,
+    batching,
+    stateRefPages,
+  ]);
 
   const currentPage = state.pages[state.currentPage];
   // 拖一张章不该让同页所有章重渲染：数组引用必须稳定，否则 memo 白包
@@ -93,11 +123,19 @@ export default function App() {
       e.preventDefault();
       setDropping(false);
       const files = Array.from(e.dataTransfer.files);
-      const pdf = files.find((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+      const pdfs = files.filter(isPdfFile);
       const img = files.find((f) => f.type.startsWith('image/'));
-      // 同时拖进来两份时先处理文档，用户改主意可以马上再拖一次章
-      if (pdf) void tool.openPdf(pdf);
-      else if (img) void tool.openSeal(img);
+      // 同时扔进文档和图片时先处理文档，用户改主意可以马上再拖一次章
+      if (pdfs.length > 1) {
+        // 一次拖多份＝「这些全都要盖」：直接开批量面板并预填，
+        // 别只打开第一份、把其余几份静默丢掉
+        setBatchFiles(pdfs);
+        setBatching(true);
+      } else if (pdfs.length === 1) {
+        void tool.openPdf(pdfs[0]);
+      } else if (img) {
+        void tool.openSeal(img);
+      }
     },
     [tool.openPdf, tool.openSeal],
   );
@@ -125,7 +163,10 @@ export default function App() {
         onRedo={redo}
         onExport={() => void exportPdf()}
         onExportAs={() => void tool.exportPdfAs()}
-        onBatch={() => setBatching(true)}
+        onBatch={() => {
+          setBatchFiles([]);
+          setBatching(true);
+        }}
       />
 
       {batching && (
@@ -133,7 +174,11 @@ export default function App() {
           seal={state.seal}
           stamp={selected}
           page={currentPage ?? null}
-          onClose={() => setBatching(false)}
+          initialFiles={batchFiles}
+          onClose={() => {
+            setBatching(false);
+            setBatchFiles([]);
+          }}
         />
       )}
 
@@ -222,9 +267,12 @@ export default function App() {
           onBeginEdit={tool.beginEdit}
           onApplyPreset={tool.applyPreset}
           onCopyAllPages={tool.copyStampToAllPages}
+          onStampOnPages={tool.stampOnPages}
           onRemove={tool.removeStamp}
           onUseSeal={tool.useSavedSeal}
           onDeleteSeal={tool.removeSavedSeal}
+          onRenameSeal={tool.renameSavedSeal}
+          onDedupeSeals={tool.dedupeSeals}
           onClearSeals={tool.clearSavedSeals}
         />
       </main>

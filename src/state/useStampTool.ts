@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
-import type { SealImage, Stamp } from '../lib/types';
+import type { SealDefaults, SealImage, Stamp } from '../lib/types';
 import { loadPdf, type PdfHandle } from '../lib/pdfReader';
 import {
   downloadBlob,
@@ -7,23 +7,28 @@ import {
   openPdfDoc,
   stampDocument,
 } from '../lib/exporter';
-import { loadSealFile, reencodeSealPng } from '../lib/seal';
+import { decodeSealPixels, loadSealFile, reencodeSealPng } from '../lib/seal';
 import { saveBytesAs } from '../lib/saveAs';
-import { mmToPt, STANDARD_SEAL_MM } from '../lib/units';
+import { mmToPt, ptToMm } from '../lib/units';
 import {
   clamp,
   clampPlacement,
-  defaultOpacity,
   defaultPlacement,
+  defaultSealDefaults,
   presetPatch,
   type StampPreset,
 } from '../lib/geometry';
+import { pageIndices, parsePageSpec } from '../lib/batch';
+import { sameInkPixels } from '../lib/sealPixels';
 import { revokeAllPngUrls } from '../lib/pngCache';
 import {
+  contentKey,
   deleteSeal as deleteSealFromStore,
+  findSealByInkKey,
   listSeals,
   pickEvictions,
   putSeal,
+  sealRecordId,
   toSavedSeal,
   toSealImage,
   clearSeals,
@@ -35,6 +40,9 @@ export type { AppState } from './reducer';
 
 /** 方向键连续微调多久算同一次编辑（毫秒）。 */
 const NUDGE_SESSION_MS = 800;
+
+/** 改完直径/角度/浓度多久后把这枚章的参数写回印章库（毫秒）。 */
+const DEFAULTS_SAVE_MS = 600;
 
 /** 侧栏 + 视口内边距的兜底宽度（量不到 DOM 时用）。 */
 const FALLBACK_CHROME_PX = 520;
@@ -112,6 +120,11 @@ export function useStampTool() {
     if (prev && prev.objectUrl !== seal.objectUrl) URL.revokeObjectURL(prev.objectUrl);
     revokeAllPngUrls();
     dispatch({ type: 'SET_SEAL', seal });
+    // 换一枚章 = 换一整套参数：直径/角度/浓度都回到这枚章自己的值
+    dispatch({
+      type: 'SEAL_DEFAULTS',
+      defaults: seal.defaults ?? defaultSealDefaults(seal.bgMode),
+    });
   }, []);
 
   /** 点选库里的一枚印章：直接用存好的 PNG，不必重跑像素处理。 */
@@ -145,9 +158,11 @@ export function useStampTool() {
       dispatch({ type: 'BUSY', label: '正在处理印章图像…' });
       try {
         const seal = await loadSealFile(file);
-        activateSeal(seal);
+        // 新导入的章：默认参数按它自己的去背路线定（翻拍件浓度必须是 1）
+        const fresh: SealImage = { ...seal, defaults: defaultSealDefaults(seal.bgMode) };
+        activateSeal(fresh);
         // 导入即入库：这是「不用重复导入」的关键一步
-        const saved = toSavedSeal(seal, Date.now());
+        const saved = toSavedSeal(fresh, Date.now());
         dispatch({ type: 'SEAL_SAVED', seal: saved });
         void putSeal(saved)
           .then(() => {
@@ -164,6 +179,173 @@ export function useStampTool() {
     },
     [activateSeal],
   );
+
+  // 这枚章在画布上调过的尺寸/角度/浓度，防抖之后写回印章库那条记录
+  const defaultsPending = useRef<{ id: string; next: Partial<SealDefaults> } | null>(null);
+  const defaultsTimer = useRef<number | null>(null);
+
+  /**
+   * 把「这枚章调过的参数」落回印章库。
+   *
+   * 库里的 id 是记录 id（优先源文件指纹），画布上的章只带 pngBytes，
+   * 所以先用墨迹指纹反查是哪一条记录，再改它。找不到（比如这枚章的图
+   * 来自一次没有入库的导入）就安静放弃——记不住参数，但绝不报错。
+   */
+  const flushSealDefaults = useCallback(() => {
+    if (defaultsTimer.current !== null) {
+      window.clearTimeout(defaultsTimer.current);
+      defaultsTimer.current = null;
+    }
+    const pending = defaultsPending.current;
+    defaultsPending.current = null;
+    if (!pending) return;
+    const cur = stateRef.current;
+    const stamp = cur.stamps.find((s) => s.id === pending.id);
+    if (!stamp) return;
+    const rec = findSealByInkKey(cur.seals, contentKey(stamp.pngBytes));
+    if (!rec) return;
+    const defaults: SealDefaults = {
+      ...(rec.defaults ?? defaultSealDefaults(rec.bgMode)),
+      ...pending.next,
+    };
+    dispatch({ type: 'SEAL_PATCHED', id: rec.id, patch: { defaults } });
+    void putSeal({ ...rec, defaults }).catch(() => undefined);
+    // 改的就是当前这枚章：下一次「放置印章」直接用新参数
+    if (cur.seal && sealRecordId(cur.seal) === rec.id) {
+      dispatch({ type: 'SEAL_DEFAULTS', defaults });
+    }
+  }, []);
+
+  /** 只关心这枚章的参数；位置、页码、选中状态都不进默认值。 */
+  const rememberSealDefaults = useCallback(
+    (id: string, patch: Partial<Stamp>) => {
+      const next: Partial<SealDefaults> = {};
+      if (patch.widthPt !== undefined) next.widthMm = ptToMm(patch.widthPt);
+      if (patch.rotationDeg !== undefined) next.rotationDeg = patch.rotationDeg;
+      if (patch.opacity !== undefined) next.opacity = patch.opacity;
+      if (Object.keys(next).length === 0) return;
+      const prev = defaultsPending.current;
+      defaultsPending.current = {
+        id,
+        next: prev && prev.id === id ? { ...prev.next, ...next } : next,
+      };
+      if (defaultsTimer.current !== null) window.clearTimeout(defaultsTimer.current);
+      defaultsTimer.current = window.setTimeout(flushSealDefaults, DEFAULTS_SAVE_MS);
+    },
+    [flushSealDefaults],
+  );
+
+  /** 给库里的一枚印章改名。文件名常常是「微信图片_2026…」这种认不出的东西。 */
+  const renameSavedSeal = useCallback((id: string, name: string) => {
+    const clean = name.trim().slice(0, 40);
+    if (!clean) return;
+    const rec = stateRef.current.seals.find((s) => s.id === id);
+    if (!rec || rec.name === clean) return;
+    dispatch({ type: 'SEAL_PATCHED', id, patch: { name: clean } });
+    void putSeal({ ...rec, name: clean }).catch(() => undefined);
+    // 正在用的就是它 → 面板上的名字跟着变
+    const cur = stateRef.current.seal;
+    if (cur && sealRecordId(cur) === id) {
+      dispatch({ type: 'SET_SEAL', seal: { ...cur, name: clean } });
+    }
+  }, []);
+
+  /**
+   * 清理重复：同一个章可能被导入过两次，肉眼完全一样。
+   *
+   * 早期库里的 id 是「处理后字节」指纹，同一次导入在黑框修复前后各存过一份，
+   * 两份只差透明区的颜色，正是同一枚章。按「墨迹逐像素相同」归组，
+   * 每组只留最近用过的那条。
+   */
+  const dedupeSeals = useCallback(async () => {
+    const list = stateRef.current.seals;
+    if (list.length < 2) return;
+    dispatch({ type: 'BUSY', label: '正在比对印章库…' });
+    try {
+      const pix = new Map<string, Uint8ClampedArray>();
+      for (const s of list) {
+        try {
+          pix.set(s.id, await decodeSealPixels(s.pngBytes));
+        } catch {
+          // 解不开的（图坏了）不参与比对，也绝不因此删掉
+        }
+      }
+      const groups: { data: Uint8ClampedArray; members: SavedSeal[] }[] = [];
+      for (const s of list) {
+        const data = pix.get(s.id);
+        if (!data) continue;
+        const hit = groups.find((g) => sameInkPixels(g.data, data));
+        if (hit) hit.members.push(s);
+        else groups.push({ data, members: [s] });
+      }
+      const doomed: string[] = [];
+      for (const g of groups) {
+        if (g.members.length < 2) continue;
+        const sorted = [...g.members].sort(
+          (a, b) => b.lastUsedAt - a.lastUsedAt || b.savedAt - a.savedAt,
+        );
+        for (const extra of sorted.slice(1)) doomed.push(extra.id);
+      }
+      if (doomed.length === 0) {
+        dispatch({ type: 'DONE', message: '印章库里没有重复的印章。' });
+        return;
+      }
+      dispatch({ type: 'SEALS_DELETED', ids: doomed });
+      await Promise.all(doomed.map((id) => deleteSealFromStore(id)));
+      dispatch({ type: 'DONE', message: `已清理 ${doomed.length} 枚重复的印章。` });
+    } catch (e) {
+      dispatch({ type: 'ERROR', message: `清理重复失败：${(e as Error).message}` });
+    }
+  }, []);
+
+  /** 把这枚章盖到指定页：单份文档也能只盖第 3 页或第 5-8 页。 */
+  const stampOnPages = useCallback((id: string, specText: string) => {
+    const { stamps, pages } = stateRef.current;
+    const src = stamps.find((s) => s.id === id);
+    if (!src) return;
+    let targets: number[];
+    try {
+      targets = pageIndices(parsePageSpec(specText), pages.length);
+    } catch (e) {
+      dispatch({ type: 'ERROR', message: (e as Error).message });
+      return;
+    }
+    const other = targets.filter((i) => i !== src.pageIndex);
+    if (other.length === 0) {
+      dispatch({
+        type: 'ERROR',
+        message: `这些页里没有需要新盖的页（这枚章已经在第 ${src.pageIndex + 1} 页）`,
+      });
+      return;
+    }
+    dispatch({
+      type: 'ADD_STAMPS',
+      stamps: other.map((i) => ({
+        ...src,
+        id: nextId(),
+        pageIndex: i,
+        ...clampPlacement(src, pages[i]),
+      })),
+    });
+    dispatch({
+      type: 'DONE',
+      message: `已盖到第 ${other.map((i) => i + 1).join('、')} 页。`,
+    });
+  }, []);
+
+  /** 复制这枚章（Ctrl+D）：偏移 5mm，免得两枚完全重合看不出变化。 */
+  const duplicateStamp = useCallback((id: string) => {
+    const { stamps, pages } = stateRef.current;
+    const src = stamps.find((s) => s.id === id);
+    if (!src) return;
+    const page = pages[src.pageIndex];
+    const off = mmToPt(5);
+    const moved = { ...src, xPt: src.xPt + off, yPt: src.yPt + off };
+    dispatch({
+      type: 'ADD_STAMPS',
+      stamps: [{ ...moved, id: nextId(), ...(page ? clampPlacement(moved, page) : {}) }],
+    });
+  }, []);
 
   // 启动时读库；没有当前印章就自动选中最近用过的那枚——打开即可盖章
   useEffect(() => {
@@ -182,11 +364,12 @@ export function useStampTool() {
   }, [useSavedSeal]);
 
   const addStamp = useCallback((pageIndex?: number) => {
-    const { seal, pages, currentPage } = stateRef.current;
+    const { seal, pages, currentPage, sealDefaults } = stateRef.current;
     const index = pageIndex ?? currentPage;
     const page = pages[index];
     if (!seal || !page) return;
-    const widthPt = mmToPt(STANDARD_SEAL_MM);
+    // 用这枚章自己的默认参数：换章之后不该沿用上一枚调过的尺寸与浓度
+    const widthPt = mmToPt(sealDefaults.widthMm);
     const heightPt = widthPt / seal.aspect;
     dispatch({
       type: 'ADD_STAMPS',
@@ -198,9 +381,9 @@ export function useStampTool() {
           widthPt,
           heightPt,
           ...defaultPlacement({ widthPt, heightPt }, page),
-          rotationDeg: -8, // 实际盖章通常略有倾斜
-          // 翻拍件不给 0.85：照片已经带真实浓淡，再压透明度会让底下的字透上来
-          opacity: defaultOpacity(seal.bgMode),
+          rotationDeg: sealDefaults.rotationDeg,
+          // 翻拍件的默认浓度是 1：照片已带真实浓淡，再压透明度会让底下的字透上来
+          opacity: sealDefaults.opacity,
           // 长宽比与像素宽度随章走：换过印章之后，这枚章仍然按自己那张图算
           aspect: seal.aspect,
           cropW: seal.cropW,
@@ -239,9 +422,18 @@ export function useStampTool() {
   }, []);
 
   const updateStamp = useCallback(
-    (id: string, patch: Partial<Stamp>, history = true) =>
-      dispatch({ type: 'UPDATE_STAMP', id, patch, history }),
-    [],
+    (id: string, patch: Partial<Stamp>, history = true) => {
+      dispatch({ type: 'UPDATE_STAMP', id, patch, history });
+      // 直径/角度/浓度是「这枚章自己的参数」，松手后记回库里那条
+      if (
+        patch.widthPt !== undefined ||
+        patch.rotationDeg !== undefined ||
+        patch.opacity !== undefined
+      ) {
+        rememberSealDefaults(id, patch);
+      }
+    },
+    [rememberSealDefaults],
   );
 
   /** 连续交互的起点快照。拖拽 pointerdown / 滑杆 focus 时调用。 */
@@ -308,6 +500,8 @@ export function useStampTool() {
     const { docFile, stamps, docFileName, pages, busy } = stateRef.current;
     // busy 期间直接忽略：导出按钮没有「进行中」态，连点会跑两遍
     if (!docFile || busy) return null;
+    // 还没落库的参数先写掉：导出的这一刻库里就该是用户看到的样子
+    flushSealDefaults();
     dispatch({ type: 'BUSY', label: '正在导出 PDF…' });
     try {
       const bytes = new Uint8Array(await docFile.arrayBuffer());
@@ -339,7 +533,7 @@ export function useStampTool() {
       dispatch({ type: 'ERROR', message: msg });
       return null;
     }
-  }, []);
+  }, [flushSealDefaults]);
 
   const exportPdf = useCallback(
     async (force = false) => {
@@ -426,11 +620,15 @@ export function useStampTool() {
     openSeal,
     useSavedSeal,
     removeSavedSeal,
+    renameSavedSeal,
+    dedupeSeals,
     clearSavedSeals,
     addStamp,
     updateStamp,
     applyPreset,
     copyStampToAllPages,
+    stampOnPages,
+    duplicateStamp,
     beginEdit,
     nudge,
     removeStamp,

@@ -5,10 +5,14 @@ import {
   clearSeals,
   contentKey,
   deleteSeal,
+  findSealByInkKey,
+  formatSavedAt,
   listSeals,
+  patchSavedSeal,
   pickEvictions,
   putSeal,
   putSeals,
+  sealRecordId,
   sortForDisplay,
   sortSeals,
   toSavedSeal,
@@ -127,3 +131,52 @@ describe('IndexedDB 存取', () => {
     expect(await listSeals()).toEqual([]);
   });
 });
+
+describe('记录 id 与改名（源文件指纹去重的那一套）', () => {
+  it('sealRecordId 优先源文件指纹：同一张原图重新处理过也是同一条记录', () => {
+    const a = sealImage({ sourceKey: 'src-1' });
+    const b = sealImage({ sourceKey: 'src-1', pngBytes: bytes(9, 9, 9, 9) });
+    expect(sealRecordId(a)).toBe('src-1');
+    expect(sealRecordId(b)).toBe(sealRecordId(a));
+  });
+
+  it('没有源文件指纹时退回处理后字节（老记录也能对上）', () => {
+    const s = sealImage();
+    expect(sealRecordId(s)).toBe(contentKey(s.pngBytes));
+  });
+
+  it('toSavedSeal 把源指纹与默认参数一起存下来', () => {
+    const s = toSavedSeal(sealImage({ sourceKey: 'src-1', defaults: { widthMm: 42, rotationDeg: -8, opacity: 1 } }), 5);
+    expect(s.id).toBe('src-1');
+    expect(s.sourceKey).toBe('src-1');
+    expect(s.defaults?.widthMm).toBe(42);
+  });
+
+  it('findSealByInkKey 按「正在用的这份图」找回库里的记录', () => {
+    const rec = toSavedSeal(sealImage(), 0);
+    expect(findSealByInkKey([rec], contentKey(rec.pngBytes))?.id).toBe(rec.id);
+    expect(findSealByInkKey([rec], contentKey(bytes(7, 7)))).toBeNull();
+  });
+
+  it('patchSavedSeal 只改命中的那条，其余原样返回', () => {
+    const list = [saved('a', 1), saved('b', 2)];
+    const out = patchSavedSeal(list, 'b', { name: '合同章.png' });
+    expect(out.find((s) => s.id === 'b')?.name).toBe('合同章.png');
+    expect(out.find((s) => s.id === 'a')?.name).toBe('a.png');
+    expect(patchSavedSeal(list, 'zzz', { name: 'x' })).toEqual(list);
+  });
+
+  it('改名能落库（重开一次仍在）', async () => {
+    const rec = saved('a', 1);
+    await putSeal(rec);
+    await putSeal({ ...rec, name: '合同专用章.png' });
+    const list = await listSeals();
+    expect(list).toHaveLength(1);
+    expect(list[0].name).toBe('合同专用章.png');
+  });
+
+  it('formatSavedAt 是「MM-DD HH:mm」', () => {
+    expect(formatSavedAt(new Date(2026, 9, 17, 9, 5).getTime())).toBe('10-17 09:05');
+  });
+});
+

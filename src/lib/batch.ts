@@ -131,6 +131,34 @@ export function stampedName(fileName: string): string {
   return `${base}-已盖章.pdf`;
 }
 
+/** 同一份文件的判据（拖放与「选择 PDF」去重共用）。 */
+export function fileKey(f: { name: string; size: number; lastModified: number }): string {
+  return `${f.name}|${f.size}|${f.lastModified}`;
+}
+
+export function isPdfFile(f: File): boolean {
+  return f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+}
+
+/**
+ * 挑出还没进过列表的 PDF（按 fileKey 去重，保持传入顺序）。
+ *
+ * 拖进来的东西往往很杂（截图、录音、文件夹里的各种文件），
+ * 不合格的静默丢掉，不要为它们弹错误。
+ */
+export function pickNewPdfs(existing: Iterable<string>, incoming: File[]): File[] {
+  const seen = new Set(existing);
+  const out: File[] = [];
+  for (const f of incoming) {
+    if (!isPdfFile(f)) continue;
+    const key = fileKey(f);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+  }
+  return out;
+}
+
 /** 批量压缩包的默认名字。 */
 export function zipName(count: number, when = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0');

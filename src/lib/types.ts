@@ -45,6 +45,18 @@ export interface PageInfo extends PageFrame {
   hPt: number;
 }
 
+/**
+ * 一枚章的参数默认值（直径/角度/浓度）。
+ *
+ * 挂在这一枚章自己身上：换一枚章不该沿用上一枚的尺寸与浓度，
+ * 否则每换一次章都得重新调三样。
+ */
+export interface SealDefaults {
+  widthMm: number;
+  rotationDeg: number;
+  opacity: number;
+}
+
 /** 处理后的印章图像：已去白边、已裁剪到墨迹边界。 */
 export interface SealImage {
   name: string;
@@ -68,4 +80,14 @@ export interface SealImage {
    *  · 'paper' —— 翻拍/扫描件：源 alpha 不可信，按纸色反推墨量
    */
   bgMode: 'alpha' | 'paper';
+  /**
+   * **源文件**字节的指纹（印章库拿它当 id）。
+   *
+   * 用源文件而不是处理后的 PNG：同一张原图在算法改动前后各导入一次，
+   * 处理后的字节不同（例如透明区从黑改成白），按处理后字节做 id 就会
+   * 在库里留下两条看着一模一样的印章。按源文件算，重新导入即刷新同一条。
+   */
+  sourceKey?: string;
+  /** 这枚章的参数默认值（用户在画布上调过就记在这里） */
+  defaults?: SealDefaults;
 }

@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { SavedSeal } from '../lib/sealStore';
+import { formatSavedAt, type SavedSeal } from '../lib/sealStore';
 
 interface Props {
   seals: SavedSeal[];
-  /** 当前正在用的那枚（按内容指纹比对） */
+  /** 当前正在用的那枚（按记录指纹比对） */
   activeId: string | null;
   onUse: (seal: SavedSeal) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDedupe: () => void;
   onClear: () => void;
 }
 
@@ -17,10 +19,21 @@ interface Props {
  * 「不用重复导入」这个需求就落在这一块。存的是处理后的 PNG，
  * 点选时不必再跑一遍去背，选中即用。
  */
-export function SealLibrary({ seals, activeId, onUse, onDelete, onClear }: Props) {
+export function SealLibrary({
+  seals,
+  activeId,
+  onUse,
+  onDelete,
+  onRename,
+  onDedupe,
+  onClear,
+}: Props) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   /** 清空是破坏性且不可撤销的，所以要按两下 */
   const [confirmClear, setConfirmClear] = useState(false);
+  /** 正在改名的那条 */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
 
   // 缩略图用 objectURL，列表一变就整批回收，别让 Blob 堆积
   useEffect(() => {
@@ -36,25 +49,45 @@ export function SealLibrary({ seals, activeId, onUse, onDelete, onClear }: Props
     };
   }, [seals]);
 
+  const startRename = (s: SavedSeal) => {
+    setEditing(s.id);
+    setDraft(s.name);
+  };
+
+  const commitRename = (id: string) => {
+    if (editing !== id) return;
+    setEditing(null);
+    onRename(id, draft);
+  };
+
   return (
     <section className="seal-lib">
       <div className="field-label lib-head">
         <span>印章库{seals.length > 0 ? ` · ${seals.length} 枚` : ''}</span>
         {seals.length > 1 && (
-          <button
-            className="link-btn"
-            title="清空本机保存的印章"
-            onClick={() => {
-              if (!confirmClear) {
-                setConfirmClear(true);
-                return;
-              }
-              setConfirmClear(false);
-              onClear();
-            }}
-          >
-            {confirmClear ? '再点一次确认清空' : '清空'}
-          </button>
+          <span className="lib-actions">
+            <button
+              className="link-btn"
+              title="把同一枚章的重复记录合并成一条"
+              onClick={onDedupe}
+            >
+              清理重复
+            </button>
+            <button
+              className="link-btn"
+              title="清空本机保存的印章"
+              onClick={() => {
+                if (!confirmClear) {
+                  setConfirmClear(true);
+                  return;
+                }
+                setConfirmClear(false);
+                onClear();
+              }}
+            >
+              {confirmClear ? '再点一次确认清空' : '清空'}
+            </button>
+          </span>
         )}
       </div>
 
@@ -68,17 +101,51 @@ export function SealLibrary({ seals, activeId, onUse, onDelete, onClear }: Props
             const active = s.id === activeId;
             return (
               <li key={s.id} className={active ? 'active' : undefined}>
-                <button className="seal-item" onClick={() => onUse(s)} title={`使用「${s.name}」`}>
+                <button
+                  className="seal-item"
+                  onClick={() => onUse(s)}
+                  title={`使用「${s.name}」`}
+                  aria-label={`使用${s.name}`}
+                >
                   <img src={urls[s.id]} alt="" draggable={false} />
-                  <span className="seal-meta">
-                    <span className="seal-name">{s.name}</span>
-                    <span className="seal-sub">
-                      {s.cropW}×{s.cropH}px
-                      {s.bgMode === 'paper' ? ' · 翻拍件' : ' · 透明底'}
-                    </span>
-                  </span>
-                  {active && <span className="seal-badge">使用中</span>}
                 </button>
+                <div className="seal-meta">
+                  <span className="seal-row">
+                    {editing === s.id ? (
+                      <input
+                        className="seal-name-input"
+                        value={draft}
+                        autoFocus
+                        maxLength={40}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onBlur={() => commitRename(s.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitRename(s.id);
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditing(null);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className="seal-name"
+                        title="双击改名"
+                        onDoubleClick={() => startRename(s)}
+                      >
+                        {s.name}
+                      </span>
+                    )}
+                    {active && editing !== s.id && <span className="seal-badge">使用中</span>}
+                  </span>
+                  <span className="seal-sub">
+                    {s.cropW}×{s.cropH}px
+                    {s.bgMode === 'paper' ? ' · 翻拍件' : ' · 透明底'}
+                    {s.savedAt ? ` · ${formatSavedAt(s.savedAt)}` : ''}
+                  </span>
+                </div>
                 <button
                   className="seal-del"
                   onClick={() => onDelete(s.id)}

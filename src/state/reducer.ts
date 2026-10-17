@@ -1,5 +1,6 @@
-import type { PageInfo, SealImage, Stamp } from '../lib/types';
-import { sortForDisplay, type SavedSeal } from '../lib/sealStore';
+import type { PageInfo, SealDefaults, SealImage, Stamp } from '../lib/types';
+import { patchSavedSeal, sortForDisplay, type SavedSeal } from '../lib/sealStore';
+import { defaultSealDefaults } from '../lib/geometry';
 
 export const HISTORY_LIMIT = 50;
 
@@ -33,6 +34,13 @@ export interface AppState {
   /** 印章库：本机保存过的印章，按最近使用排序 */
   seals: SavedSeal[];
   /**
+   * 「放置印章」用的参数（直径/角度/浓度）。
+   *
+   * 跟着**当前这枚章**走：换一枚章就换一套默认值，而不是沿用上一枚调过的
+   * 尺寸与浓度——否则每换一次章都要把三样重新调一遍。
+   */
+  sealDefaults: SealDefaults;
+  /**
    * 等待确认的「换文档」请求。
    *
    * LOAD_PDF 会连撤销栈一起清掉，是应用里唯一不可挽回的操作；
@@ -57,6 +65,7 @@ export const initialState: AppState = {
   error: null,
   signWarning: null,
   seals: [],
+  sealDefaults: defaultSealDefaults('alpha'),
   pendingPdf: null,
 };
 
@@ -67,6 +76,8 @@ export type Action =
   | { type: 'SEALS_LOADED'; seals: SavedSeal[] }
   | { type: 'SEAL_SAVED'; seal: SavedSeal }
   | { type: 'SEALS_DELETED'; ids: string[] }
+  | { type: 'SEAL_PATCHED'; id: string; patch: Partial<SavedSeal> }
+  | { type: 'SEAL_DEFAULTS'; defaults: SealDefaults }
   | { type: 'PDF_CONFIRM'; file: File }
   | { type: 'PDF_CANCEL' }
   | { type: 'ADD_STAMPS'; stamps: Stamp[] }
@@ -137,14 +148,27 @@ export function reducer(state: AppState, action: Action): AppState {
 
     /** 导入或再次选用时入库；同一枚章（内容指纹相同）只留一条，只刷新时间。 */
     case 'SEAL_SAVED': {
+      // 同一枚章再次导入（源文件指纹相同）＝刷新它，不是新增一条：
+      // 用户改过的名字、以及这枚章记住的直径/角度/浓度，不能被文件里的默认值冲掉。
+      const old = state.seals.find((s) => s.id === action.seal.id);
+      const merged: SavedSeal = old
+        ? { ...action.seal, name: old.name, defaults: old.defaults ?? action.seal.defaults }
+        : action.seal;
       const rest = state.seals.filter((s) => s.id !== action.seal.id);
-      return { ...state, seals: sortForDisplay([...rest, action.seal]) };
+      return { ...state, seals: sortForDisplay([...rest, merged]) };
     }
 
     case 'SEALS_DELETED': {
       const gone = new Set(action.ids);
       return { ...state, seals: state.seals.filter((s) => !gone.has(s.id)) };
     }
+
+    /** 改名、记住参数：只动库里那一条，不碰画布上的印章。 */
+    case 'SEAL_PATCHED':
+      return { ...state, seals: patchSavedSeal(state.seals, action.id, action.patch) };
+
+    case 'SEAL_DEFAULTS':
+      return { ...state, sealDefaults: action.defaults };
 
     case 'ADD_STAMPS':
       if (action.stamps.length === 0) return state;

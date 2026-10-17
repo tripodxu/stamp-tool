@@ -3,7 +3,7 @@ import type { PageInfo, SealImage, Stamp } from '../lib/types';
 import { PRESET_LABELS, defaultOpacity, type StampPreset } from '../lib/geometry';
 import { mmToPt, ptToMm, STANDARD_SEAL_MM } from '../lib/units';
 import { pngObjectUrl } from '../lib/pngCache';
-import { parsePageSpec, type BatchSeed } from '../lib/batch';
+import { fileKey, parsePageSpec, pickNewPdfs, type BatchSeed } from '../lib/batch';
 import { useBatchStamp, type BatchFile } from '../state/useBatchStamp';
 
 /**
@@ -19,6 +19,8 @@ export interface BatchPanelProps {
   /** 画布上选中的那枚章：位置/尺寸/角度的来源 */
   stamp: Stamp | null;
   page: PageInfo | null;
+  /** 一次拖进多份 PDF 时预填的文件（拖放进来的那几份） */
+  initialFiles?: File[];
   onClose: () => void;
 }
 
@@ -26,8 +28,17 @@ const PRESETS: StampPreset[] = ['signature', 'rightBottom', 'bindingEdge'];
 
 let fileSeq = 0;
 
-export function BatchPanel({ seal, stamp, page, onClose }: BatchPanelProps) {
-  const [files, setFiles] = useState<BatchFile[]>([]);
+/** 新的在前、去重、只留 PDF：拖进来的和手动选的走同一条路。 */
+function mergeFiles(incoming: File[], prev: BatchFile[]): BatchFile[] {
+  const fresh = pickNewPdfs(
+    prev.map((f) => fileKey(f.file)),
+    incoming,
+  );
+  return [...prev, ...fresh.map((file) => ({ id: `bf-${++fileSeq}`, file }))];
+}
+
+export function BatchPanel({ seal, stamp, page, initialFiles, onClose }: BatchPanelProps) {
+  const [files, setFiles] = useState<BatchFile[]>(() => mergeFiles(initialFiles ?? [], []));
   const [specText, setSpecText] = useState('');
   const [specError, setSpecError] = useState<string | null>(null);
   const [mode, setMode] = useState<'offset' | 'preset'>(stamp ? 'offset' : 'preset');
@@ -69,18 +80,7 @@ export function BatchPanel({ seal, stamp, page, onClose }: BatchPanelProps) {
   const addFiles = (list: FileList | null) => {
     if (!list) return;
     const incoming = Array.from(list);
-    setFiles((prev) => {
-      const seen = new Set(prev.map((f) => `${f.file.name}|${f.file.size}|${f.file.lastModified}`));
-      const next = [...prev];
-      for (const file of incoming) {
-        if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') continue;
-        const key = `${file.name}|${file.size}|${file.lastModified}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        next.push({ id: `bf-${++fileSeq}`, file });
-      }
-      return next;
-    });
+    setFiles((prev) => mergeFiles(incoming, prev));
     batch.reset();
   };
 

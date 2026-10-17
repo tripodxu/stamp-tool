@@ -1,5 +1,5 @@
-import type { PageInfo, Stamp } from './types';
-import { mmToPt } from './units';
+import type { PageInfo, SealDefaults, Stamp } from './types';
+import { mmToPt, STANDARD_SEAL_MM } from './units';
 
 /**
  * 本文件只放**几何决策**（摆哪儿、多大），不放坐标变换。
@@ -68,6 +68,24 @@ export function presetPatch(
  */
 export function defaultOpacity(bgMode: 'alpha' | 'paper'): number {
   return bgMode === 'paper' ? 1 : 0.85;
+}
+
+/** 新章的默认角度：真实盖章很少是正的。 */
+export const DEFAULT_ROTATION_DEG = -8;
+
+/**
+ * 一枚新章的默认参数。
+ *
+ * 三样一起给（而不是各写各的），是为了让「换一枚章」= 「换一整套参数」：
+ * 直径回到 40mm、角度回到 −8°、浓度按这枚章自己的去背路线定
+ * （翻拍件必须是 1，见 defaultOpacity）。
+ */
+export function defaultSealDefaults(bgMode: 'alpha' | 'paper'): SealDefaults {
+  return {
+    widthMm: STANDARD_SEAL_MM,
+    rotationDeg: DEFAULT_ROTATION_DEG,
+    opacity: defaultOpacity(bgMode),
+  };
 }
 
 /**

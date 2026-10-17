@@ -6,6 +6,7 @@ import {
   inkBounds,
   removePaperBackground,
   removeWhiteFringe,
+  sameInkPixels,
 } from '../src/lib/sealPixels';
 
 /**
@@ -242,3 +243,28 @@ describe('bleachTransparent：透明区漂白', () => {
     expect(bleachTransparent(d)).toBe(0);
   });
 });
+
+describe('sameInkPixels：判断两枚章是不是同一枚（「清理重复」的依据）', () => {
+  const px = (...list: number[][]) => new Uint8ClampedArray(list.flat());
+
+  it('透明区颜色不同不算差别——正是 canvas 黑透明区 vs 自写编码白透明区', () => {
+    const canvasEncoded = px([0, 0, 0, 0], [230, 0, 18, 255]);
+    const ours = px([255, 255, 255, 0], [230, 0, 18, 255]);
+    expect(sameInkPixels(canvasEncoded, ours)).toBe(true);
+  });
+
+  it('墨的颜色或浓淡变了就不是同一枚', () => {
+    const base = px([255, 255, 255, 0], [230, 0, 18, 255]);
+    expect(sameInkPixels(base, px([255, 255, 255, 0], [200, 0, 18, 255]))).toBe(false);
+    expect(sameInkPixels(base, px([255, 255, 255, 0], [230, 0, 18, 128]))).toBe(false);
+  });
+
+  it('尺寸不同直接判否，不越界读', () => {
+    expect(sameInkPixels(px([1, 2, 3, 255]), px([1, 2, 3, 255], [1, 2, 3, 255]))).toBe(false);
+  });
+
+  it('两边都是空图：算同一枚（全透明的图不该被当成两枚不同的章）', () => {
+    expect(sameInkPixels(px([0, 0, 0, 0]), px([9, 9, 9, 0]))).toBe(true);
+  });
+});
+

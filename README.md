@@ -200,11 +200,38 @@ python scripts/check-export-alpha.py 导出的.pdf --image 对照图.png
 
     python scripts/acceptance-ux.py
 
+## 少点鼠标：拖进来、键盘、以及「这枚章就爱这么盖」
+
+![快捷键一览](testdata/ux-keys-menu.png)
+
+这几处都不是算错了，而是「功能在、但找不着 / 每次都得重设一遍」，所以同样单开一个
+脚本在真实窗口里点着验收。
+
+- **一次拖进多份 PDF**：以前只打开第一份、其余静默丢掉；现在 2 份以上直接开批量面板并预填
+  （同一枚章、同一套规则，一次盖完打包成 ZIP）。
+- **单份也能按页码盖**：印章面板里多了一行输入框，写 `1,3,5-8` 或者 `末页` 就行，留空＝全部页。
+  页码解析与批量盖章共用同一段代码（`src/lib/batch.ts` 的 `parsePageSpec`），
+  所以「全部要单独写」「看不懂的写法」这些提示两边完全一致。
+- **印章库能改名**：双击名字直接改。列表里顺带显示导入时间与「翻拍件 / 透明底」，
+  右上角多了「清理重复」——同一枚章的两个文件（比如黑框修复前后各导一次）会只留一条。
+  判重比的是**墨迹像素**：α=0 处的颜色差异不算差异（那正是 canvas 编码与自写编码的区别），
+  墨色或浓淡变了就算两枚不同的章。另外，重复导入同一个文件不会再新增条目、也不会把
+  改过的名字冲回文件名。
+- **键盘**：`Delete` 删掉选中的章、`Ctrl+D` 复制一枚（右下偏移 5mm），
+  工具栏的「?」把全部快捷键列出来（以前这些键都实现了、界面上一个字没提）。
+- **每枚章记住自己的直径 / 角度 / 浓度**：改完就按这一枚的 PNG 指纹存进印章库，
+  下次选用、甚至关掉程序重开，放下去的章都按它自己的参数来——不会拿上一枚的 40mm/−8°
+  去套另一枚。重新导入同一个文件同样不会把它冲回默认值。
+
+验收（多份拖入、按页码、改名、去重、键盘、参数记忆，共 16 条）：
+
+    python scripts/acceptance-improve.py
+
 ## 测试
 
 ```bash
-npm test                                # 单测：12 个文件 / 118 条（映射/几何/单位/撤销栈/
-                                        #   导出矩阵/PNG 编码/ZIP/批量页码/另存为）
+npm test                                # 单测：12 个文件 / 140 条（映射/几何/单位/撤销栈/
+                                        #   导出矩阵/PNG 编码/ZIP/批量页码/另存为/印章去重）
 npm run test:watch                      # 同上，改动即跑
 python scripts/check-pagefixtures.py    # 夹具自检（栅格化确认方向没搞反）
 python scripts/check-export-alpha.py X.pdf   # 导出体检：透明区是不是白的（防黑框）
@@ -230,7 +257,8 @@ python scripts/acceptance.py             # 普通 A4：导入 → 盖章 → 导
 python scripts/acceptance-pageframes.py  # 旋转页 / 裁切框：四种页面逐一核对
 python scripts/acceptance-sealibrary.py  # 印章库：关掉再打开，验证不用重新导入
 python scripts/acceptance-batch.py       # 批量：4 份文件 → ZIP → 逐页量印迹
-python scripts/acceptance-ux.py          # 交互：换文档确认、翻页、跳页、另存为（17 条）
+python scripts/acceptance-ux.py          # 交互：换文档确认、翻页、跳页、另存为（18 条）
+python scripts/acceptance-improve.py     # 用户层面：多份拖入、按页码、改名去重、键盘、参数记忆（16 条）
 ```
 
 调试端口由脚本自动挑：默认的 9333 可能被别的应用占着（实测遇到过），
@@ -254,6 +282,7 @@ Python 侧依赖：`pip install -r scripts/requirements.txt`。
 | `testdata/batch-panel.png` | 批量盖章面板（上面那一节用的截图） |
 | `testdata/ux-confirm-open.png` | 换文档确认条（操作手感那一节） |
 | `testdata/ux-pager-menu.png` | 页码输入与「有章」下拉 |
+| `testdata/ux-keys-menu.png` | 快捷键浮层（「少点鼠标」那一节） |
 
 夹具的角标刻意用**蓝色**：像素校验靠「红 = 印章」找印迹，夹具自己再用红色就会污染测量。
 
