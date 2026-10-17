@@ -412,7 +412,7 @@ export function useStampTool() {
     dispatch({ type: 'ADD_STAMPS', stamps: clones });
   }, []);
 
-  /** 一键摆放：落款处 / 右下角 / 骑缝。 */
+  /** 一键摆放：落款处 / 右下角 / 骑缝（左·右）。 */
   const applyPreset = useCallback((id: string, kind: StampPreset) => {
     const { stamps, pages } = stateRef.current;
     const stamp = stamps.find((s) => s.id === id);

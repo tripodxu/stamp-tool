@@ -31,10 +31,17 @@ describe('位置预设', () => {
     }
   });
 
-  it('骑缝章刻意一半在页外（章心压页边）', () => {
-    const p = presetPatch(size, a4, 'bindingEdge');
+  it('骑缝（右）刻意一半在页外（章心压右边缘）', () => {
+    const p = presetPatch(size, a4, 'bindingEdgeRight');
     expect(p.xPt + size.widthPt).toBeGreaterThan(a4.wPt);
     expect(p.xPt).toBeLessThan(a4.wPt);
+  });
+
+  it('骑缝（左）章心压左边缘，一半在页外（左侧装订的合同）', () => {
+    const p = presetPatch(size, a4, 'bindingEdgeLeft');
+    expect(p.xPt + size.widthPt / 2).toBeCloseTo(0, 6);
+    expect(p.xPt).toBeLessThan(0);
+    expect(p.xPt + size.widthPt).toBeGreaterThan(0);
   });
 
   it('右下角距边 12mm', () => {
@@ -43,9 +50,31 @@ describe('位置预设', () => {
     expect(a4.hPt - (p.yPt + size.heightPt)).toBeCloseTo(mmToPt(12), 6);
   });
 
-  it('骑缝章的章心压在页面右边缘（多页才能天然对齐）', () => {
-    const p = presetPatch(size, a4, 'bindingEdge');
-    expect(p.xPt + size.widthPt / 2).toBeCloseTo(a4.wPt, 6);
+  it('两种骑缝的章心分别压在左右边缘（多页才能天然对齐）', () => {
+    const right = presetPatch(size, a4, 'bindingEdgeRight');
+    expect(right.xPt + size.widthPt / 2).toBeCloseTo(a4.wPt, 6);
+    const left = presetPatch(size, a4, 'bindingEdgeLeft');
+    expect(left.xPt + size.widthPt / 2).toBeCloseTo(0, 6);
+    // 纵向位置一致：只有横向不同
+    expect(left.yPt).toBeCloseTo(right.yPt, 6);
+  });
+
+  it('骑缝的纵向：章顶在页面高度的 28% 处（自页顶算，左右一致）', () => {
+    // 量的是显示坐标（原点在页面左上角），所以「28%」是自上而下的 28%。
+    // 之前这里没有断言，验收脚本里的期望值一度按「自页底算」写反了，
+    // 靠真实导出文件的像素才把语义钉住（见 scripts/acceptance-batch.py）。
+    for (const kind of ['bindingEdgeLeft', 'bindingEdgeRight'] as const) {
+      const p = presetPatch(size, a4, kind);
+      expect(p.yPt, kind).toBeCloseTo(a4.hPt * 0.28, 6);
+      // 章心 = 28% + 半个章（42mm 章 → 21mm，A4 高 297mm）
+      expect((p.yPt + size.heightPt / 2) / a4.hPt, kind).toBeCloseTo(0.28 + 21 / 297, 3);
+    }
+  });
+
+  it('每个预设都有标签（漏一个界面上就是空白按钮）', () => {
+    expect(Object.keys(PRESET_LABELS).sort()).toEqual(
+      ['bindingEdgeLeft', 'bindingEdgeRight', 'rightBottom', 'signature'],
+    );
   });
 });
 

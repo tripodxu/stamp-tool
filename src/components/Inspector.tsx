@@ -83,7 +83,7 @@ export function Inspector({
           <li>选择要盖章的 PDF 文件</li>
           <li>上传背景透明的公章图片</li>
           <li>拖动调整位置，拖右下角调整大小</li>
-          <li>用「落款处 / 右下角 / 骑缝」一键摆放</li>
+          <li>用「落款处 / 右下角 / 骑缝（左·右）」一键摆放</li>
           <li>导出 PDF</li>
         </ol>
         <p className="note">
@@ -296,7 +296,8 @@ export function Inspector({
 const PRESET_HINTS: Record<StampPreset, string> = {
   signature: '正文下方偏左的落款位置',
   rightBottom: '页面右下角，距边 12mm',
-  bindingEdge: '章心压在页面右边缘，多页自动对齐',
+  bindingEdgeLeft: '章心压在页面左边缘（左侧装订），一半在页外',
+  bindingEdgeRight: '章心压在页面右边缘（右侧装订），一半在页外',
 };
 
 /**

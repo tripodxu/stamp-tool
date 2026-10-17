@@ -13,22 +13,35 @@ import { mmToPt, STANDARD_SEAL_MM } from './units';
 export const clamp = (v: number, lo: number, hi: number) =>
   Math.min(hi, Math.max(lo, v));
 
-/** 一键摆放预设。 */
-export type StampPreset = 'signature' | 'rightBottom' | 'bindingEdge';
+/**
+ * 一键摆放预设。
+ *
+ * 骑缝分左右：章要压在**装订边**那一侧。中文合同多数左侧装订，
+ * 但也有右侧装订（右翻本、部分港澳台合同），所以两个方向都给。
+ */
+export type StampPreset =
+  | 'signature'
+  | 'rightBottom'
+  | 'bindingEdgeLeft'
+  | 'bindingEdgeRight';
 
 export const PRESET_LABELS: Record<StampPreset, string> = {
   signature: '落款处',
   rightBottom: '右下角',
-  bindingEdge: '骑缝',
+  bindingEdgeLeft: '骑缝（左）',
+  bindingEdgeRight: '骑缝（右）',
 };
 
 const MARGIN = mmToPt(12);
 
 /**
- * 预设位置的返回值一律是**左上角**坐标（与 Stamp.xPt/yPt 同一定义）。
+ * 预设位置的返回值一律是**左上角**坐标（与 Stamp.xPt/yPt 同一定义，
+ * 即显示坐标：原点在页面左上角、y 向下；导出时才按该页 /Rotate 换算）。
  *
- * 「骑缝」刻意让章心压在页面右边缘（xPt + w/2 = page.wPt）：
+ * 「骑缝（左/右）」刻意让章心压在页面左/右边缘（xPt + w/2 = 0 或 page.wPt）：
  * 它按相对页边的量计算，多页之间天然对齐——这正是骑缝章的技术要求。
+ * 一半在页外是有意为之：装订后两半才对得上（导出时也照原样写进 PDF）。
+ * 纵向：章顶落在页面高度的 28% 处（自页顶算），左右两枚完全一致。
  */
 export function presetPatch(
   s: Pick<Stamp, 'widthPt' | 'heightPt'>,
@@ -42,7 +55,13 @@ export function presetPatch(
         yPt: page.hPt - s.heightPt - MARGIN,
         rotationDeg: -8,
       };
-    case 'bindingEdge':
+    case 'bindingEdgeLeft':
+      return {
+        xPt: -s.widthPt / 2,
+        yPt: page.hPt * 0.28,
+        rotationDeg: 0,
+      };
+    case 'bindingEdgeRight':
       return {
         xPt: page.wPt - s.widthPt / 2,
         yPt: page.hPt * 0.28,

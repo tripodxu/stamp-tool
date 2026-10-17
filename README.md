@@ -155,8 +155,15 @@ python scripts/check-export-alpha.py 导出的.pdf --image 对照图.png
 某一份失败不会中断整批，界面上逐条给出 ✓/✗ 与原因。
 
 - **位置是规则，不是绝对坐标**。画布上已经有章时，可以沿用「距页左上角的偏移」；
-  画布上没有章（或想换规则）就按**预设**（落款处 / 右下角 / 骑缝）逐页重算——
+  画布上没有章（或想换规则）就按**预设**（落款处 / 右下角 / 骑缝（左·右））逐页重算——
   页面尺寸不同会自动适配。这正是批量必须用规则的原因：各文件的页数与页面大小都可能不同。
+- **骑缝章压在装订边**：`骑缝（左）` 用于左侧装订（中文合同多数如此），
+  `骑缝（右）` 用于右翻本。章心压在页边、一半在页外——装订后两半才对得上；
+  纵向落在**页面高度的 28% 处**（章顶，自页顶算），同尺寸的页之间天然对齐。
+
+  ![骑缝（左）导出效果](testdata/binding-left-export.png)
+
+  上面这张是验收脚本导出的实物：左边只看得见半枚章，正是「压在装订边上」的样子。
 - **页码**写 `1,3,5-8`，或者 `末页`；**留空＝全部页**。越界的页号直接忽略，
   这样同一份规则能套在页数不同的文件上；某份文件一页都没选中就跳过它并记原因。
 - **含数字签名的文件跳过**并记原因——盖章会让签名失效，批量里不该替用户做这个决定
@@ -166,7 +173,7 @@ python scripts/check-export-alpha.py 导出的.pdf --image 对照图.png
 - 不做「直接写进某个文件夹」（`showDirectoryPicker`）：原生选择器没法自动化验收，
   而代价只是用户多解压一次。
 
-端到端验收（真实窗口里跑三批：全部页 / 末页 / 页码全部越界）：
+端到端验收（真实窗口里跑四批：全部页 / 末页 / 页码全部越界 / 骑缝（左））：
 
     python scripts/acceptance-batch.py
 
@@ -230,7 +237,7 @@ python scripts/check-export-alpha.py 导出的.pdf --image 对照图.png
 ## 测试
 
 ```bash
-npm test                                # 单测：12 个文件 / 140 条（映射/几何/单位/撤销栈/
+npm test                                # 单测：12 个文件 / 143 条（映射/几何/单位/撤销栈/
                                         #   导出矩阵/PNG 编码/ZIP/批量页码/另存为/印章去重）
 npm run test:watch                      # 同上，改动即跑
 python scripts/check-pagefixtures.py    # 夹具自检（栅格化确认方向没搞反）
@@ -256,7 +263,7 @@ python scripts/check-export-alpha.py X.pdf   # 导出体检：透明区是不是
 python scripts/acceptance.py             # 普通 A4：导入 → 盖章 → 导出 → 像素核对
 python scripts/acceptance-pageframes.py  # 旋转页 / 裁切框：四种页面逐一核对
 python scripts/acceptance-sealibrary.py  # 印章库：关掉再打开，验证不用重新导入
-python scripts/acceptance-batch.py       # 批量：4 份文件 → ZIP → 逐页量印迹
+python scripts/acceptance-batch.py       # 批量：4 份文件 → ZIP → 逐页量印迹；骑缝（左）贴边
 python scripts/acceptance-ux.py          # 交互：换文档确认、翻页、跳页、另存为（18 条）
 python scripts/acceptance-improve.py     # 用户层面：多份拖入、按页码、改名去重、键盘、参数记忆（16 条）
 ```
@@ -280,6 +287,7 @@ Python 侧依赖：`pip install -r scripts/requirements.txt`。
 | `testdata/black-frame-before-after.png` | 导出黑框对照图（左=旧，右=修复后） |
 | `testdata/ghost-before-after.png` | 翻拍章「重影」对照图（左=旧，右=修复后） |
 | `testdata/batch-panel.png` | 批量盖章面板（上面那一节用的截图） |
+| `testdata/binding-left-export.png` | 骑缝（左）的真实导出页（只有半枚章在页内） |
 | `testdata/ux-confirm-open.png` | 换文档确认条（操作手感那一节） |
 | `testdata/ux-pager-menu.png` | 页码输入与「有章」下拉 |
 | `testdata/ux-keys-menu.png` | 快捷键浮层（「少点鼠标」那一节） |

@@ -24,7 +24,12 @@ export interface BatchPanelProps {
   onClose: () => void;
 }
 
-const PRESETS: StampPreset[] = ['signature', 'rightBottom', 'bindingEdge'];
+const PRESETS: StampPreset[] = [
+  'signature',
+  'rightBottom',
+  'bindingEdgeLeft',
+  'bindingEdgeRight',
+];
 
 let fileSeq = 0;
 
