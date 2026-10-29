@@ -16,6 +16,8 @@ interface Props {
   onNudge: (id: string, dxPt: number, dyPt: number) => void;
   onBeginEdit: () => void;
   onRemove: (id: string) => void;
+  /** 双指捏合改缩放（手机）。不传则不启用。 */
+  onZoom?: (z: number) => void;
 }
 
 export function PageCanvas({
@@ -30,8 +32,10 @@ export function PageCanvas({
   onNudge,
   onBeginEdit,
   onRemove,
+  onZoom,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
 
   /**
@@ -80,12 +84,50 @@ export function PageCanvas({
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedId, onNudge]);
 
+  // 双指捏合 = 缩放画布（手机）。桌面无 touch 事件，天然不触发。
+  // 章上的单指拖拽先被 .stamp-box 的 pointer 事件消费，两指必有至少一指
+  // 落在空白处；监听放捕获阶段，preventDefault 压掉浏览器默认手势
+  // （viewport 已在 meta 里禁了整页缩放，这里防的是滚动抢事件）。
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !onZoom) return;
+    let pinch: { dist: number; zoom: number } | null = null;
+    const span = (t: TouchList) =>
+      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        pinch = { dist: span(e.touches) || 1, zoom };
+        e.preventDefault();
+      }
+    };
+    const onMove = (e: TouchEvent) => {
+      if (pinch && e.touches.length === 2) {
+        onZoom(pinch.zoom * (span(e.touches) / pinch.dist));
+        e.preventDefault();
+      }
+    };
+    const onEnd = () => {
+      pinch = null;
+    };
+    stage.addEventListener('touchstart', onStart, { passive: false, capture: true });
+    stage.addEventListener('touchmove', onMove, { passive: false, capture: true });
+    stage.addEventListener('touchend', onEnd, { capture: true });
+    stage.addEventListener('touchcancel', onEnd, { capture: true });
+    return () => {
+      stage.removeEventListener('touchstart', onStart, { capture: true } as AddEventListenerOptions);
+      stage.removeEventListener('touchmove', onMove, { capture: true } as AddEventListenerOptions);
+      stage.removeEventListener('touchend', onEnd, { capture: true } as AddEventListenerOptions);
+      stage.removeEventListener('touchcancel', onEnd, { capture: true } as AddEventListenerOptions);
+    };
+  }, [zoom, onZoom]);
+
   // 拖拽空白处取消选中
   const onBackgroundPointerDown = () => onSelect(null);
 
   return (
     <div className="page-wrap">
       <div
+        ref={stageRef}
         className="page-stage"
         style={{ width: page.wPt * zoom, height: page.hPt * zoom }}
         onPointerDown={onBackgroundPointerDown}

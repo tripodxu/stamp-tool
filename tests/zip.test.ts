@@ -12,6 +12,10 @@ import { crc32 } from '../src/lib/png';
 const enc = new TextEncoder();
 const bytes = (s: string) => enc.encode(s);
 
+/** makeZip 现在返回 Blob（省整包复制）；测试里读回字节来按格式检查。 */
+const zipBytes = async (entries: Parameters<typeof makeZip>[0]): Promise<Uint8Array> =>
+  new Uint8Array(await (await makeZip(entries)).arrayBuffer());
+
 interface Entry {
   name: string;
   flags: number;
@@ -66,7 +70,7 @@ function readZip(zip: Uint8Array): Entry[] {
 describe('makeZip', () => {
   it('单个条目能原样读回来（CRC 与长度都对得上）', async () => {
     const content = bytes('hello 印章');
-    const entries = readZip(await makeZip([{ name: 'a.pdf', bytes: content }]));
+    const entries = readZip(await zipBytes([{ name: 'a.pdf', bytes: content }]));
     expect(entries).toHaveLength(1);
     expect(entries[0].name).toBe('a.pdf');
     expect(entries[0].content).toEqual(content);
@@ -75,7 +79,7 @@ describe('makeZip', () => {
   });
 
   it('中文文件名带 UTF-8 标志位（位 11）', async () => {
-    const entries = readZip(await makeZip([{ name: '合同-已盖章.pdf', bytes: bytes('x') }]));
+    const entries = readZip(await zipBytes([{ name: '合同-已盖章.pdf', bytes: bytes('x') }]));
     expect(entries[0].name).toBe('合同-已盖章.pdf');
     expect(entries[0].flags & 0x0800).toBe(0x0800);
   });
@@ -85,7 +89,7 @@ describe('makeZip', () => {
       name,
       bytes: bytes(`内容${i}`.repeat(50)),
     }));
-    const entries = readZip(await makeZip(list));
+    const entries = readZip(await zipBytes(list));
     expect(entries.map((e) => e.name)).toEqual(['一.pdf', '二.pdf', '三.pdf']);
     entries.forEach((e, i) => {
       expect(new TextDecoder().decode(e.content)).toBe(`内容${i}`.repeat(50));
@@ -94,7 +98,7 @@ describe('makeZip', () => {
 
   it('重名自动加序号，不互相覆盖', async () => {
     const entries = readZip(
-      await makeZip([
+      await zipBytes([
         { name: 'x.pdf', bytes: bytes('1') },
         { name: 'x.pdf', bytes: bytes('2') },
         { name: 'x.pdf', bytes: bytes('3') },
@@ -105,7 +109,7 @@ describe('makeZip', () => {
 
   it('文件名里的路径分隔符被拍平（不许解压到别处）', async () => {
     const entries = readZip(
-      await makeZip([{ name: '../../etc/a\\b.pdf', bytes: bytes('x') }]),
+      await zipBytes([{ name: '../../etc/a\\b.pdf', bytes: bytes('x') }]),
     );
     // 分隔符变下划线，开头那串点也被去掉（'.._.._etc_a_b.pdf' → '_.._etc_a_b.pdf'）
     expect(entries[0].name).toBe('_.._etc_a_b.pdf');
@@ -125,9 +129,18 @@ describe('makeZip', () => {
       s >>>= 0;
       noise[i] = s & 0xff;
     }
-    const entries = readZip(await makeZip([{ name: 'noise.bin', bytes: noise }]));
+    const entries = readZip(await zipBytes([{ name: 'noise.bin', bytes: noise }]));
     expect(entries[0].method).toBe(0);
     expect(entries[0].content).toEqual(noise);
+  });
+
+  it('compress: false 直接 store（跳过对 PDF 白做的 deflate），内容原样', async () => {
+    // 这段内容本来能压小——用 compress:false 强制跳过尝试，
+    // 断言 method 为 0 且字节原样（批量导出走的就是这条路）
+    const compressible = bytes('能压小的重复内容'.repeat(100));
+    const entries = readZip(await zipBytes([{ name: 'a.pdf', bytes: compressible, compress: false }]));
+    expect(entries[0].method).toBe(0);
+    expect(entries[0].content).toEqual(compressible);
   });
 
   it('没有文件时报错', async () => {

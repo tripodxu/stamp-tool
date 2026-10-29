@@ -11,6 +11,8 @@
     "test:watch": "vitest",
     "fixtures": "node scripts/make-pagefixtures.mjs && python scripts/check-pagefixtures.py",
     "tauri": "node scripts/run-tauri.cjs",
+    "android": "node scripts/run-android.cjs",
+    "apk": "node scripts/make-apk.mjs",
     "release": "node scripts/release.mjs"
   },
   "dependencies": {

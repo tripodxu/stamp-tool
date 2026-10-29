@@ -5,6 +5,16 @@ import { PageCanvas } from './components/PageCanvas';
 import { Inspector } from './components/Inspector';
 import { BatchPanel } from './components/BatchPanel';
 import { isPdfFile } from './lib/batch';
+import { useMediaQuery } from './lib/useMediaQuery';
+
+/** 手机断点：结构分叉（顶栏+底部栏+抽屉），不是纯 CSS 换摆法。 */
+const MOBILE_QUERY = '(max-width: 599px)';
+/**
+ * 触屏 UA 兜底。Android WebView 可能忽略 meta viewport（wry 未设
+ * useWideViewPort），innerWidth 不是设备逻辑宽度，媒体查询会失真；
+ * UA 不受影响，作为第一判据。
+ */
+const MOBILE_UA = /Android|iPhone|iPad|iPod|Mobile/i;
 
 export default function App() {
   const tool = useStampTool();
@@ -13,8 +23,18 @@ export default function App() {
   const stampCount = state.stamps.length;
   const [dropping, setDropping] = useState(false);
   const [batching, setBatching] = useState(false);
+  /** 批量面板正在跑（由面板上报）：Esc 关面板的捷径在 busy 时要让路 */
+  const [batchBusy, setBatchBusy] = useState(false);
   /** 一次拖进多份 PDF 时，先把它们交给批量面板 */
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const isNarrow = useMediaQuery(MOBILE_QUERY);
+  const isMobile = isNarrow || MOBILE_UA.test(navigator.userAgent);
+  /** 手机：Inspector 抽屉开合。选中章自动弹起（见下方 effect）。 */
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const mPdfRef = useRef<HTMLInputElement>(null);
+  const mSealRef = useRef<HTMLInputElement>(null);
+  /** 拍照直传：翻拍照片本就是去背算法的主战场（paper 路线） */
+  const mCamRef = useRef<HTMLInputElement>(null);
 
   /**
    * 键盘监听要读「当前第几页」，但把 state 放进依赖数组会让监听每次渲染
@@ -39,9 +59,10 @@ export default function App() {
         else undo();
       }
       if (e.key === 'Escape') {
-        // 批量面板开着时，Esc 先关面板
-        if (batching) setBatching(false);
-        else select(null);
+        // 批量面板开着时，Esc 先关面板——但批量正在跑时不能关：
+        // 面板一卸载进度和结果列表就没了，循环却还在后台继续
+        if (batching && !batchBusy) setBatching(false);
+        else if (!batching) select(null);
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'e' && stampCount) {
         e.preventDefault();
@@ -90,6 +111,7 @@ export default function App() {
     duplicateStamp,
     stampCount,
     batching,
+    batchBusy,
     stateRefPages,
   ]);
 
@@ -100,6 +122,19 @@ export default function App() {
     [state.stamps, state.currentPage],
   );
   const selected = state.stamps.find((s) => s.id === state.selectedId) ?? null;
+
+  // 手机：点选一枚章 → 弹抽屉调参数。两个例外：
+  //  · 「放置」新章不弹——用户下一步是看章落在哪、拖到位置，不是调参数；
+  //  · 拖动/缩放中必收——抽屉(62vh)盖着画布，不收就看不见章在动。
+  const suppressDrawer = useRef(false);
+  useEffect(() => {
+    if (isMobile && state.selectedId && !suppressDrawer.current) setDrawerOpen(true);
+    suppressDrawer.current = false;
+  }, [isMobile, state.selectedId]);
+  const mobileBeginEdit = useCallback(() => {
+    setDrawerOpen(false);
+    tool.beginEdit();
+  }, [tool.beginEdit]);
 
   // 「有章的页」下拉：页码去重升序
   const stampPages = useMemo(
@@ -140,49 +175,9 @@ export default function App() {
     [tool.openPdf, tool.openSeal],
   );
 
-  return (
-    <div className="app">
-      <Toolbar
-        hasDoc={!!state.docFile}
-        hasSeal={!!state.seal}
-        stampCount={stats.stampCount}
-        pageCount={stats.pageCount}
-        page={state.currentPage}
-        stampPages={stampPages}
-        zoom={state.zoom}
-        canUndo={stats.canUndo}
-        canRedo={stats.canRedo}
-        busy={!!state.busy}
-        onOpenPdf={tool.openPdf}
-        onOpenSeal={tool.openSeal}
-        onAddStamp={() => tool.addStamp()}
-        onPage={tool.setPage}
-        onJumpToPage={jumpToPage}
-        onZoom={tool.setZoom}
-        onUndo={undo}
-        onRedo={redo}
-        onExport={() => void exportPdf()}
-        onExportAs={() => void tool.exportPdfAs()}
-        onBatch={() => {
-          setBatchFiles([]);
-          setBatching(true);
-        }}
-      />
-
-      {batching && (
-        <BatchPanel
-          seal={state.seal}
-          stamp={selected}
-          page={currentPage ?? null}
-          initialFiles={batchFiles}
-          onClose={() => {
-            setBatching(false);
-            setBatchFiles([]);
-          }}
-        />
-      )}
-
-      {/* 换文档＝连撤销栈一起清，唯一退不回来的操作，先问一句 */}
+  /** 横幅们（错误/完成/签名警告/忙碌/换文档确认）：桌面手机共用。 */
+  const banners = (
+    <>
       {state.pendingPdf && (
         <div className="banner warn">
           <span>
@@ -220,6 +215,224 @@ export default function App() {
         </div>
       )}
       {state.busy && <div className="banner busy">{state.busy}</div>}
+    </>
+  );
+
+  const inspector = (
+    <Inspector
+      seal={state.seal}
+      stamp={selected}
+      page={currentPage ?? null}
+      pageCount={stats.pageCount}
+      seals={state.seals}
+      onUpdate={tool.updateStamp}
+      onBeginEdit={tool.beginEdit}
+      onApplyPreset={tool.applyPreset}
+      onCopyAllPages={tool.copyStampToAllPages}
+      onStampOnPages={tool.stampOnPages}
+      onRemove={tool.removeStamp}
+      onUseSeal={tool.useSavedSeal}
+      onDeleteSeal={tool.removeSavedSeal}
+      onRenameSeal={tool.renameSavedSeal}
+      onDedupeSeals={tool.dedupeSeals}
+      onClearSeals={tool.clearSavedSeals}
+    />
+  );
+
+  const batchPanel = batching && (
+    <BatchPanel
+      seal={state.seal}
+      stamp={selected}
+      page={currentPage ?? null}
+      initialFiles={batchFiles}
+      onBusyChange={setBatchBusy}
+      onClose={() => {
+        setBatching(false);
+        setBatchFiles([]);
+      }}
+    />
+  );
+
+  // ---- 手机布局：顶栏 + 画布 + 浮条 + 底部操作栏 + 抽屉 ----
+  if (isMobile) {
+    const pickFile = (ref: React.RefObject<HTMLInputElement | null>) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0];
+      if (f) {
+        if (ref === mPdfRef) void tool.openPdf(f);
+        else void tool.openSeal(f);
+      }
+      e.target.value = '';
+    };
+    return (
+      <div className="app mobile">
+        <header className="m-top">
+          <span className="brand">印章工具</span>
+          {stampCount > 0 && <span className="m-count">{stampCount} 枚章</span>}
+          <span className="flex-spacer" />
+          <button className="m-icon" disabled={!stats.canUndo} onClick={undo} aria-label="撤销">
+            ↺
+          </button>
+          <button className="m-icon" disabled={!stats.canRedo} onClick={redo} aria-label="重做">
+            ↻
+          </button>
+          <button
+            className="primary"
+            disabled={!state.docFile || stampCount === 0 || !!state.busy}
+            onClick={() => void exportPdf()}
+          >
+            {state.busy ? '处理中…' : '导出'}
+          </button>
+        </header>
+
+        {banners}
+
+        <main className="m-main">
+          <section className={`viewport${dropping ? ' is-dropping' : ''}`}>
+            {state.docFile && tool.pdfHandle.current && currentPage ? (
+              <PageCanvas
+                handle={tool.pdfHandle.current}
+                pageIndex={state.currentPage}
+                page={currentPage}
+                zoom={state.zoom}
+                stamps={pageStamps}
+                selectedId={state.selectedId}
+                onSelect={tool.select}
+                onUpdate={tool.updateStamp}
+                onNudge={tool.nudge}
+                onBeginEdit={mobileBeginEdit}
+                onRemove={tool.removeStamp}
+                onZoom={tool.setZoom}
+              />
+            ) : (
+              <div className="empty">
+                <h1>把章盖在文件上</h1>
+                <p>点下方「PDF」选文件，「印章」从相册选图或直接拍照。</p>
+                <p className="note">全部处理都在本机完成，文件不会上传。</p>
+              </div>
+            )}
+          </section>
+
+          {state.docFile && (
+            <div className="m-float">
+              {stats.pageCount > 1 && (
+                <>
+                  <button
+                    disabled={state.currentPage === 0}
+                    onClick={() => setPage(state.currentPage - 1)}
+                    aria-label="上一页"
+                  >
+                    ‹
+                  </button>
+                  <span>
+                    {state.currentPage + 1}/{stats.pageCount}
+                  </span>
+                  <button
+                    disabled={state.currentPage >= stats.pageCount - 1}
+                    onClick={() => setPage(state.currentPage + 1)}
+                    aria-label="下一页"
+                  >
+                    ›
+                  </button>
+                  <i className="m-sep" />
+                </>
+              )}
+              <button onClick={() => tool.setZoom(state.zoom - 0.15)} aria-label="缩小">
+                −
+              </button>
+              <span>{Math.round(state.zoom * 100)}%</span>
+              <button onClick={() => tool.setZoom(state.zoom + 0.15)} aria-label="放大">
+                +
+              </button>
+            </div>
+          )}
+
+          <button className="m-drawer-toggle" onClick={() => setDrawerOpen((v) => !v)}>
+            {drawerOpen ? '收起 ▾' : '印章库 · 参数 ▴'}
+          </button>
+
+          <nav className="m-bottom">
+            <button onClick={() => mPdfRef.current?.click()}>PDF</button>
+            <button onClick={() => mSealRef.current?.click()}>印章</button>
+            <button onClick={() => mCamRef.current?.click()}>拍照</button>
+            <button disabled={!state.seal} onClick={() => { suppressDrawer.current = true; tool.addStamp(); }}>
+              放置
+            </button>
+            <button
+              disabled={!state.seal || !!state.busy}
+              onClick={() => {
+                setBatchFiles([]);
+                setBatching(true);
+              }}
+            >
+              批量
+            </button>
+          </nav>
+
+          {drawerOpen && (
+            <div className="m-drawer">
+              {/* sticky 收起条：抽屉一开就把外侧把手盖住了，必须自带关闭口 */}
+              <button className="m-drawer-close" onClick={() => setDrawerOpen(false)}>
+                收起 ▾
+              </button>
+              {inspector}
+            </div>
+          )}
+
+          <input ref={mPdfRef} type="file" accept="application/pdf,.pdf" hidden onChange={pickFile(mPdfRef)} />
+          <input
+            ref={mSealRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            onChange={pickFile(mSealRef)}
+          />
+          <input
+            ref={mCamRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={pickFile(mCamRef)}
+          />
+        </main>
+        {batchPanel}
+      </div>
+    );
+  }
+
+  // ---- 桌面布局（现状，不动） ----
+  return (
+    <div className="app">
+      <Toolbar
+        hasDoc={!!state.docFile}
+        hasSeal={!!state.seal}
+        stampCount={stats.stampCount}
+        pageCount={stats.pageCount}
+        page={state.currentPage}
+        stampPages={stampPages}
+        zoom={state.zoom}
+        canUndo={stats.canUndo}
+        canRedo={stats.canRedo}
+        busy={!!state.busy}
+        onOpenPdf={tool.openPdf}
+        onOpenSeal={tool.openSeal}
+        onAddStamp={() => tool.addStamp()}
+        onPage={tool.setPage}
+        onJumpToPage={jumpToPage}
+        onZoom={tool.setZoom}
+        onUndo={undo}
+        onRedo={redo}
+        onExport={() => void exportPdf()}
+        onExportAs={() => void tool.exportPdfAs()}
+        onBatch={() => {
+          setBatchFiles([]);
+          setBatching(true);
+        }}
+      />
+
+      {batchPanel}
+
+      {banners}
 
       <main className="main">
         <section
@@ -257,24 +470,7 @@ export default function App() {
           )}
         </section>
 
-        <Inspector
-          seal={state.seal}
-          stamp={selected}
-          page={currentPage ?? null}
-          pageCount={stats.pageCount}
-          seals={state.seals}
-          onUpdate={tool.updateStamp}
-          onBeginEdit={tool.beginEdit}
-          onApplyPreset={tool.applyPreset}
-          onCopyAllPages={tool.copyStampToAllPages}
-          onStampOnPages={tool.stampOnPages}
-          onRemove={tool.removeStamp}
-          onUseSeal={tool.useSavedSeal}
-          onDeleteSeal={tool.removeSavedSeal}
-          onRenameSeal={tool.renameSavedSeal}
-          onDedupeSeals={tool.dedupeSeals}
-          onClearSeals={tool.clearSavedSeals}
-        />
+        {inspector}
       </main>
     </div>
   );

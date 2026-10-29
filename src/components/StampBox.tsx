@@ -53,6 +53,12 @@ function StampBoxImpl({
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<DragMode | null>(null);
+  // pointermove 里只读最新值、不触发重绑：resize 期间 widthPt 每帧都变，
+  // 若把它放进下面那个 effect 的依赖，window 监听器会跟着每帧解绑重绑一遍。
+  const stampRef = useRef(stamp);
+  stampRef.current = stamp;
+  const pageRef = useRef(page);
+  pageRef.current = page;
 
   // 拖拽期间用 ref 直写 style，避免每帧 re-render（决策 1：拖拽只是改两个 CSS 值）
   useEffect(() => {
@@ -129,6 +135,7 @@ function StampBoxImpl({
       const d = drag.current;
       const el = ref.current;
       if (!d || !el) return;
+      const cur = stampRef.current;
 
       if (d.kind === 'move') {
         const dx = (e.clientX - d.startX) / zoom;
@@ -138,14 +145,14 @@ function StampBoxImpl({
           {
             xPt: d.originX + dx,
             yPt: d.originY + dy,
-            widthPt: stamp.widthPt,
-            heightPt: stamp.heightPt,
+            widthPt: cur.widthPt,
+            heightPt: cur.heightPt,
           },
-          page,
+          pageRef.current,
         );
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
-        onUpdate(stamp.id, { xPt: x, yPt: y }, false);
+        onUpdate(cur.id, { xPt: x, yPt: y }, false);
       } else if (d.kind === 'resize') {
         // 中心用开始时锁定的那份，不随当前尺寸/旋转漂移
         const dist = Math.hypot(e.clientX - d.cx, e.clientY - d.cy);
@@ -155,7 +162,7 @@ function StampBoxImpl({
         const h = d.originH * scale;
         el.style.width = `${w}px`;
         el.style.height = `${h}px`;
-        onUpdate(stamp.id, { widthPt: w, heightPt: h }, false);
+        onUpdate(cur.id, { widthPt: w, heightPt: h }, false);
       } else {
         const delta = angleTo(e.clientX, e.clientY, d.cx, d.cy) - d.startAngle;
         let rot = normalizeDeg(d.originRot + delta);
@@ -164,7 +171,7 @@ function StampBoxImpl({
         else if (Math.abs(rot) < 2.5) rot = 0;
         rot = Math.round(rot * 10) / 10;
         el.style.transform = `rotate(${rot}deg)`;
-        onUpdate(stamp.id, { rotationDeg: rot }, false);
+        onUpdate(cur.id, { rotationDeg: rot }, false);
       }
     };
 
@@ -179,7 +186,8 @@ function StampBoxImpl({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [zoom, stamp.id, stamp.widthPt, stamp.heightPt, page, onUpdate]);
+    // zoom 参与屏幕位移换算必须重绑；章的实时值走 stampRef，不进依赖
+  }, [zoom, onUpdate]);
 
   return (
     <div

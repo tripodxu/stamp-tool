@@ -15,6 +15,12 @@ export interface ZipEntry {
   /** 归档内的文件名（可含中文；路径分隔符会被替换成下划线） */
   name: string;
   bytes: Uint8Array;
+  /**
+   * 已知压不动的内容（PDF 本身就是压缩流）置 false：跳过 deflate 尝试。
+   * 否则每个条目都要全量 deflate 一遍再比大小——对 PDF 几乎必输，
+   * 白烧一遍 CPU（大批量能多花几十秒）。
+   */
+  compress?: boolean;
 }
 
 const MAX_ENTRIES = 0xffff;
@@ -27,7 +33,14 @@ const FLAG_UTF8 = 0x0800;
 const METHOD_STORE = 0;
 const METHOD_DEFLATE = 8;
 
-export async function makeZip(entries: ZipEntry[]): Promise<Uint8Array> {
+/**
+ * 打包成一个 Blob（type: application/zip）。
+ *
+ * 返回 Blob 而不是 Uint8Array：把几十份产物 concat 成一整块会让峰值内存
+ * 翻倍（entries 一份 + 拼接副本一份）；Blob 按分片引用组装，Chromium 会
+ * 把它落到磁盘缓存而不是常驻堆里。
+ */
+export async function makeZip(entries: ZipEntry[]): Promise<Blob> {
   if (entries.length === 0) throw new Error('没有可打包的文件');
   if (entries.length > MAX_ENTRIES) {
     throw new Error(`文件太多（${entries.length} 个），一个 ZIP 最多装 ${MAX_ENTRIES} 个`);
@@ -43,7 +56,7 @@ export async function makeZip(entries: ZipEntry[]): Promise<Uint8Array> {
     const name = uniqueName(cleanName(entry.name), used);
     const nameBytes = new TextEncoder().encode(name);
     const raw = entry.bytes;
-    const deflated = await deflateRaw(raw);
+    const deflated = entry.compress === false ? null : await deflateRaw(raw);
     // 压不小就存原文：PDF 本身已是压缩流，再套一层常常反而更大
     const useDeflate = deflated !== null && deflated.length < raw.length;
     const method = useDeflate ? METHOD_DEFLATE : METHOD_STORE;
@@ -74,7 +87,7 @@ export async function makeZip(entries: ZipEntry[]): Promise<Uint8Array> {
     u32(EOCD_SIG), u16(0), u16(0), u16(entries.length), u16(entries.length),
     u32(centralBytes.length), u32(offset), u16(0),
   ]);
-  return concat([...parts, centralBytes, eocd]);
+  return new Blob([...parts, centralBytes, eocd] as BlobPart[], { type: 'application/zip' });
 }
 
 /** deflate-raw（ZIP 用的就是裸 deflate）；环境不支持时返回 null，退回 store。 */

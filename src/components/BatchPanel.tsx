@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PageInfo, SealImage, Stamp } from '../lib/types';
 import { PRESET_LABELS, defaultOpacity, type StampPreset } from '../lib/geometry';
 import { mmToPt, ptToMm, STANDARD_SEAL_MM } from '../lib/units';
@@ -21,6 +21,8 @@ export interface BatchPanelProps {
   page: PageInfo | null;
   /** 一次拖进多份 PDF 时预填的文件（拖放进来的那几份） */
   initialFiles?: File[];
+  /** 批量是否在跑。上报给 App：Esc 关面板的捷径在 busy 时要让路 */
+  onBusyChange?: (busy: boolean) => void;
   onClose: () => void;
 }
 
@@ -42,7 +44,7 @@ function mergeFiles(incoming: File[], prev: BatchFile[]): BatchFile[] {
   return [...prev, ...fresh.map((file) => ({ id: `bf-${++fileSeq}`, file }))];
 }
 
-export function BatchPanel({ seal, stamp, page, initialFiles, onClose }: BatchPanelProps) {
+export function BatchPanel({ seal, stamp, page, initialFiles, onBusyChange, onClose }: BatchPanelProps) {
   const [files, setFiles] = useState<BatchFile[]>(() => mergeFiles(initialFiles ?? [], []));
   const [specText, setSpecText] = useState('');
   const [specError, setSpecError] = useState<string | null>(null);
@@ -51,6 +53,13 @@ export function BatchPanel({ seal, stamp, page, initialFiles, onClose }: BatchPa
   const inputRef = useRef<HTMLInputElement>(null);
   const batch = useBatchStamp();
   const { busy, outcomes, zipSaved } = batch;
+
+  // 批量跑着的时候，Esc 不能把面板关掉（关闭按钮 disabled、背景点击
+  // 都有 busy 判断，Esc 原来是唯一的漏洞）。App 拿这个状态去拦 Esc。
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
 
   // 印章规格：画布上有章就照搬那一枚（尺寸/角度/浓度/图像），
   // 没有就按新章的默认值来——与「放置印章」按钮的行为完全一致。
@@ -277,7 +286,12 @@ export function BatchPanel({ seal, stamp, page, initialFiles, onClose }: BatchPa
           {outcomes.length > 0 && (
             <section className="batch-step">
               <h3>结果</h3>
-              {zipSaved ? (
+              {batch.zipPending ? (
+                /* 手机：跑完先别动——share 需要新鲜手势，由这个按钮提供 */
+                <button className="primary deliver-zip" onClick={() => void batch.deliverZip()}>
+                  保存 / 分享压缩包（{batch.zipPending.name}）
+                </button>
+              ) : zipSaved ? (
                 <p className="batch-ok">
                   已打包「{zipSaved}」，保存在「下载」文件夹里（{okCount} 份）。
                 </p>
@@ -302,10 +316,14 @@ export function BatchPanel({ seal, stamp, page, initialFiles, onClose }: BatchPa
 
         <footer className="batch-foot">
           {busy ? (
-            <div className="batch-progress">
-              <div className="batch-bar" style={{ width: `${pct}%` }} />
-              <span>{batch.label || '处理中…'}</span>
-            </div>
+            <>
+              <div className="batch-progress">
+                <div className="batch-bar" style={{ width: `${pct}%` }} />
+                <span>{batch.label || '处理中…'}</span>
+              </div>
+              {/* 跑起来以前只能干等。取消＝停在下一份的边界，已完成的部分照常打包 */}
+              <button onClick={batch.cancel}>取消</button>
+            </>
           ) : (
             <>
               <span className="batch-dim">

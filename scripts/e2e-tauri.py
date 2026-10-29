@@ -30,6 +30,10 @@ try:
     tgt = find_page_target()
     assert tgt, "no page target"
     ws = WS(tgt["webSocketDebuggerUrl"])
+    # 把下载指到 OUTDIR：不设的话 WebView2 落到系统「下载」，脚本轮询 OUTDIR
+    # 永远等不到文件（acceptance-batch.py 一直是这么做的，这里曾漏掉）。
+    ws.call("Browser.setDownloadBehavior",
+            {"behavior": "allow", "downloadPath": str(OUTDIR), "eventsEnabled": True})
 
     def ev(expr, await_promise=False, timeout=90):
         r = ws.call("Runtime.evaluate", {

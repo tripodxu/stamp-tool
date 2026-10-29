@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PageInfo } from '../lib/types';
 import { loadPdf } from '../lib/pdfReader';
 import { downloadBytes, hasSignatureField, openPdfDoc, stampDocument } from '../lib/exporter';
 import { reencodeSealPng } from '../lib/seal';
+import { shareFile } from '../lib/saveAs';
 import {
   batchStamps,
   pageIndices,
@@ -53,22 +54,65 @@ export function useBatchStamp() {
   const [label, setLabel] = useState('');
   const [outcomes, setOutcomes] = useState<BatchOutcome[]>([]);
   const [zipSaved, setZipSaved] = useState<string | null>(null);
+  /**
+   * 手机：跑完先存住 ZIP，等用户点「保存 / 分享」再交付。
+   *
+   * 为什么不跑完自动分享：navigator.share 要求 transient user activation
+   * （约 5 秒窗口）。批量一跑几十秒，「开始」那次点击早就过期，share 会被
+   * 拒绝并落入 downloadBlob 回退——而 Android WebView 没有下载器，
+   * 结果就是 UI 说「已保存」文件却哪儿都没有。改成按钮触发 = 全新手势。
+   */
+  const [zipPending, setZipPending] = useState<{ name: string; blob: Blob } | null>(null);
+  /** 组件还在不在。卸载后置 false：循环继续跑完（下载仍会触发），但不再碰 state。 */
   const alive = useRef(true);
+  /** 用户点过「取消」。循环在每个文件边界检查；已完成的仍会打包交付。 */
+  const cancelRequested = useRef(false);
+
+  // alive 曾经是死守卫（从不置 false）。现在接上卸载清理：
+  // Esc/路由切换把面板卸掉后，循环不该再对已卸载组件刷状态。
+  useEffect(() => () => { alive.current = false; }, []);
 
   const reset = useCallback(() => {
+    cancelRequested.current = false;
     setBusy(false);
     setDone(0);
     setTotal(0);
     setLabel('');
     setOutcomes([]);
     setZipSaved(null);
+    setZipPending(null);
   }, []);
+
+  /** 请求取消：当前这份文件处理完就停，已完成的部分照常打包交付。 */
+  const cancel = useCallback(() => {
+    cancelRequested.current = true;
+    setLabel('正在取消（当前这份处理完就停）…');
+  }, []);
+
+  /** 手机：把跑好的 ZIP 交给用户（按钮触发，手势新鲜）。 */
+  const deliverZip = useCallback(async () => {
+    const z = zipPending;
+    if (!z) return;
+    const res = await shareFile(z.blob, z.name, 'application/zip');
+    if (res.status === 'shared') {
+      setZipPending(null);
+      setZipSaved(z.name);
+      return;
+    }
+    if (res.status === 'cancelled') return; // 用户在分享面板上取消，静默
+    // 环境不支持分享：退回下载并透出原因（Android WebView 上下载仍会静默，
+    // 但至少提示里写明发生了什么，不谎报成功）
+    downloadBytes(z.blob, z.name, 'application/zip');
+    setZipPending(null);
+    setZipSaved(`${z.name}（注意：分享不可用 ${res.reason ?? ''}，已尝试下载）`);
+  }, [zipPending]);
 
   const run = useCallback(async (input: BatchInput) => {
     const { files, selector, placement, seed, origin } = input;
     if (files.length === 0) return;
 
     alive.current = true;
+    cancelRequested.current = false;
     setBusy(true);
     setDone(0);
     setTotal(files.length);
@@ -79,6 +123,7 @@ export function useBatchStamp() {
     const results: BatchOutcome[] = [];
 
     for (let i = 0; i < files.length; i++) {
+      if (cancelRequested.current) break;
       const { file } = files[i];
       if (alive.current) {
         setLabel(`正在处理 ${i + 1}/${files.length}：${file.name}`);
@@ -89,8 +134,10 @@ export function useBatchStamp() {
       const outName = stampedName(file.name);
       try {
         // 页面几何要走 pdf.js（它才是预览的参照系），盖章要走 pdf-lib。
-        // 两边都会把 ArrayBuffer 读走，所以文件读两次——这是设计代价，不是疏漏。
-        const probe = await loadPdf(new Uint8Array(await file.arrayBuffer()), file.name);
+        // 文件只读一次盘：pdf.js 会把传入的 buffer 转移走，所以给它一份
+        // slice 拷贝，原件留给 pdf-lib——比读两次盘省一半 I/O。
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const probe = await loadPdf(bytes.slice(), file.name);
         let pages: PageInfo[];
         try {
           pages = probe.pages;
@@ -110,7 +157,7 @@ export function useBatchStamp() {
           continue;
         }
 
-        const doc = await openPdfDoc(new Uint8Array(await file.arrayBuffer()));
+        const doc = await openPdfDoc(bytes);
         if (hasSignatureField(doc)) {
           results.push({
             fileName: file.name,
@@ -134,7 +181,7 @@ export function useBatchStamp() {
           frames: pages,
           prepareImage: reencodeSealPng,
         });
-        entries.push({ name: outName, bytes: out });
+        entries.push({ name: outName, bytes: out, compress: false });
         results.push({ fileName: file.name, outName, stampedPages: stamps.length, ok: true });
       } catch (err) {
         results.push({
@@ -152,12 +199,18 @@ export function useBatchStamp() {
       }
     }
 
+    const cancelled = cancelRequested.current;
     if (entries.length > 0) {
       try {
         const name = zipName(entries.length);
         const zip = await makeZip(entries);
-        downloadBytes(zip, name, 'application/zip');
-        if (alive.current) setZipSaved(name);
+        if (isMobileEnv()) {
+          // 手势早已过期，share 必被拒：存住，等结果区的「保存 / 分享」按钮
+          if (alive.current) setZipPending({ name, blob: zip });
+        } else {
+          downloadBytes(zip, name, 'application/zip');
+          if (alive.current) setZipSaved(name);
+        }
       } catch (err) {
         results.push({
           fileName: '（打包）',
@@ -171,12 +224,12 @@ export function useBatchStamp() {
 
     if (alive.current) {
       setOutcomes([...results]);
-      setLabel('');
+      setLabel(cancelled ? `已取消：完成 ${entries.length}/${files.length} 份` : '');
       setBusy(false);
     }
   }, []);
 
-  return { busy, done, total, label, outcomes, zipSaved, run, reset };
+  return { busy, done, total, label, outcomes, zipSaved, zipPending, run, reset, cancel, deliverZip };
 }
 
 /** 把内部错误翻译成用户能懂的一句话。 */
@@ -186,3 +239,6 @@ function describeError(err: unknown): string {
   if (/InvalidPDF|Invalid PDF|structure/i.test(msg)) return '这个文件不是有效的 PDF，或者已经损坏';
   return msg || '处理失败';
 }
+
+/** 手机 WebView 环境（与 App.tsx 的 MOBILE_UA 同判据）。 */
+const isMobileEnv = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);

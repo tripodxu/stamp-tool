@@ -159,9 +159,10 @@ function keyOf(bytes: Uint8Array): string {
   return `${bytes.length}:${h >>> 0}`;
 }
 
-/** 触发一次浏览器下载。批量导出（ZIP）也走这里，只是 MIME 与后缀不同。 */
-export function downloadBytes(bytes: Uint8Array, fileName: string, mime: string) {
-  const blob = new Blob([bytes as BlobPart], { type: mime });
+/** 触发一次浏览器下载。批量导出（ZIP）也走这里，只是 MIME 与后缀不同。
+ *  传 Blob（makeZip 的产物）时直接用，不再复制一份。 */
+export function downloadBytes(data: Blob | Uint8Array, fileName: string, mime: string) {
+  const blob = data instanceof Blob ? data : new Blob([data as BlobPart], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

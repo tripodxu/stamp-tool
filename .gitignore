@@ -22,6 +22,9 @@ __pycache__/
 # 端到端脚本的下载目录
 testdata/_downloads/
 
+# Android 构建产物（APK 与签名中间物）
+dist-android/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

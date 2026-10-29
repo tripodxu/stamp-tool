@@ -819,7 +819,7 @@ button.ghost {
 
 .seal-badge {
   flex: none;
-  font-size: 10px;
+  font-size: 14px;
   color: var(--accent);
   border: 1px solid #e3b4b7;
   border-radius: 4px;
@@ -1096,3 +1096,238 @@ button.ghost {
   white-space: nowrap;
 }
 
+
+/* ============================================================
+   手机布局（.app.mobile，<600px 由 App.tsx 结构分叉渲染）
+   顶栏（品牌/撤销/重做/导出） + 画布 + 浮条（页码/缩放）
+   + 底部操作栏（PDF/印章/拍照/放置/批量） + 底部抽屉（Inspector）
+   ============================================================ */
+
+.app.mobile {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.flex-spacer {
+  flex: 1;
+}
+
+.m-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.m-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.m-icon {
+  min-width: 40px;
+  min-height: 40px;
+  font-size: 18px;
+  padding: 0;
+}
+
+.m-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* 画布占满，滚动在内 */
+.app.mobile .viewport {
+  flex: 1;
+  padding: 10px;
+  align-items: center;
+}
+
+.app.mobile .empty h1 {
+  font-size: 19px;
+}
+
+/* 页码 + 缩放浮条：悬在底部操作栏上方，不占布局空间 */
+.m-float {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 2px 10px rgba(20, 25, 35, 0.18);
+  z-index: 5;
+}
+
+.m-float button {
+  min-width: 38px;
+  min-height: 38px;
+  font-size: 17px;
+  padding: 0;
+}
+
+.m-float span {
+  min-width: 52px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+  margin: 0 6px;
+}
+
+/* 抽屉开关：胶囊把手，浮在底部栏正上方居中 */
+.m-drawer-toggle {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(66px + env(safe-area-inset-bottom, 0px));
+  padding: 6px 18px;
+  min-height: 36px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 10px rgba(20, 25, 35, 0.18);
+  font-size: 13px;
+  color: var(--text);
+  z-index: 6;
+  white-space: nowrap;
+}
+
+/* 底部操作栏：五个等宽大按钮，单手拇指可达 */
+.m-bottom {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.m-bottom button {
+  flex: 1;
+  min-height: 48px;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+/* 抽屉：Inspector 整体塞进来，覆盖桌面 .panel 的定宽 */
+.m-drawer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(64px + 8px + env(safe-area-inset-bottom, 0px));
+  max-height: 62vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -4px 24px rgba(20, 25, 35, 0.25);
+  z-index: 7;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app.mobile .m-drawer .panel {
+  width: auto;
+  border-left: none;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+}
+
+/* 抽屉/批量面板里的按钮触控目标加大（chip 除外，一排放不下） */
+.app.mobile .m-drawer button:not(.chip):not(.seal-del):not(.link-btn),
+.app.mobile .batch-card button:not(.chip) {
+  min-height: 42px;
+}
+
+/* 拖拽手柄按手指加大：反缩放机制不变（calc(1/zoom)），只改基础尺寸 */
+.app.mobile .stamp-handle {
+  width: 24px;
+  height: 24px;
+}
+
+.app.mobile .stamp-handle-se {
+  right: calc(-12px / var(--zoom, 1));
+  bottom: calc(-12px / var(--zoom, 1));
+}
+
+.app.mobile .stamp-rot {
+  width: 24px;
+  height: 24px;
+  top: calc(-44px / var(--zoom, 1));
+  margin-left: calc(-12px / var(--zoom, 1));
+}
+
+.app.mobile .stamp-rot::before {
+  height: 20px;
+}
+
+.app.mobile .stamp-delete {
+  width: 32px;
+  height: 32px;
+  top: calc(-16px / var(--zoom, 1));
+  right: calc(-16px / var(--zoom, 1));
+  font-size: 18px;
+}
+
+/* 横幅在手机上占位不小，收紧内距、按钮加大 */
+.app.mobile .banner {
+  padding: 8px 12px;
+}
+
+.app.mobile .banner button {
+  min-height: 38px;
+}
+
+/* 批量面板：手机上卡片占满，主体留滚动 */
+.app.mobile .batch-card {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app.mobile .batch-body {
+  flex: 1;
+  min-height: 0;
+  /* 跑完批量后结果区的「保存/分享」按钮会滚到底部，不加留白会被固定
+     页脚（开始批量盖章）盖住——点交付反而触发重跑（真机踩过） */
+  padding-bottom: 150px;
+}
+
+
+/* 抽屉自带的收起条：sticky 常驻顶部，滚动到哪都能关 */
+.m-drawer-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  background: var(--surface);
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 14px 14px 0 0;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+}

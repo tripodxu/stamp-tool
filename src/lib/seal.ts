@@ -198,13 +198,23 @@ export async function loadSealFile(
  *
  * 用在导出前：印章库里存的字节是历史版本（canvas 编的，透明区是黑的），
  * 老章不重新过一遍就还是黑框。走的就是导入时那条像素链，是幂等的。
+ *
+ * 结果按输入字节的指纹缓存：同一枚章每次导出、批量导出每份文件都调一次，
+ * 没必要反复走 canvas 解码＋像素处理＋PNG 编码这一整条链。
  */
+const reencodeCache = new Map<string, Uint8Array>();
+
 export async function reencodeSealPng(pngBytes: Uint8Array): Promise<Uint8Array> {
+  const key = contentKey(pngBytes);
+  const hit = reencodeCache.get(key);
+  if (hit) return hit;
   const url = URL.createObjectURL(new Blob([pngBytes as BlobPart], { type: 'image/png' }));
   try {
     const img = await loadImage(url);
     const { data, cropW, cropH } = processSealPixels(img, img.naturalWidth, img.naturalHeight);
-    return await encodePngRgba(data, cropW, cropH);
+    const out = await encodePngRgba(data, cropW, cropH);
+    reencodeCache.set(key, out);
+    return out;
   } finally {
     URL.revokeObjectURL(url);
   }

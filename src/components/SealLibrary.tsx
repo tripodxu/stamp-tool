@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatSavedAt, type SavedSeal } from '../lib/sealStore';
 
 interface Props {
@@ -29,25 +29,35 @@ export function SealLibrary({
   onClear,
 }: Props) {
   const [urls, setUrls] = useState<Record<string, string>>({});
+  /** 正在生效的 objectURL（卸载时回收用）。列表一变做**增量**更新：
+   *  点一次章会 bump lastUsedAt 触发整列表重渲，若整批重建 URL，
+   *  全部缩略图都要重新解码（肉眼能看到闪一下）。id 不变就复用旧 URL。 */
+  const liveUrls = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const prev = liveUrls.current;
+    const next: Record<string, string> = {};
+    for (const s of seals) {
+      next[s.id] = prev[s.id] ?? URL.createObjectURL(
+        new Blob([s.pngBytes as BlobPart], { type: 'image/png' }),
+      );
+    }
+    for (const [id, u] of Object.entries(prev)) {
+      if (!(id in next)) URL.revokeObjectURL(u);
+    }
+    liveUrls.current = next;
+    setUrls(next);
+  }, [seals]);
+  useEffect(
+    () => () => {
+      for (const u of Object.values(liveUrls.current)) URL.revokeObjectURL(u);
+    },
+    [],
+  );
   /** 清空是破坏性且不可撤销的，所以要按两下 */
   const [confirmClear, setConfirmClear] = useState(false);
   /** 正在改名的那条 */
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-
-  // 缩略图用 objectURL，列表一变就整批回收，别让 Blob 堆积
-  useEffect(() => {
-    const next: Record<string, string> = {};
-    for (const s of seals) {
-      next[s.id] = URL.createObjectURL(
-        new Blob([s.pngBytes as BlobPart], { type: 'image/png' }),
-      );
-    }
-    setUrls(next);
-    return () => {
-      for (const u of Object.values(next)) URL.revokeObjectURL(u);
-    };
-  }, [seals]);
 
   const startRename = (s: SavedSeal) => {
     setEditing(s.id);

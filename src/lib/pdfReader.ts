@@ -44,23 +44,26 @@ const isPasswordError = (e: unknown) =>
  * 而 pdf-lib 只认 MediaBox、不认旋转。少采一个，导出就会偏——见 pageSpace.ts。
  */
 async function readPages(doc: PDFDocumentProxy): Promise<PageInfo[]> {
-  const pages: PageInfo[] = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const vp = page.getViewport({ scale: 1 });
-    const view = page.view;
-    pages.push({
-      // 显示空间尺寸 = 预览里那张纸的宽高
-      wPt: vp.width,
-      hPt: vp.height,
-      // 复制一份：pdf.js 内部可能复用同一个数组
-      view: [view[0], view[1], view[2], view[3]],
-      rotation: page.rotate,
-      userUnit: page.userUnit ?? 1,
-    });
-    page.cleanup();
-  }
-  return pages;
+  // 并行 getPage：几百页的文档串行等 worker 一次一个来回，肉眼可见地慢；
+  // worker 侧本就会排队处理，这里只是让往返重叠起来。
+  return Promise.all(
+    Array.from({ length: doc.numPages }, async (_, i) => {
+      const page = await doc.getPage(i + 1);
+      const vp = page.getViewport({ scale: 1 });
+      const view = page.view;
+      const info: PageInfo = {
+        // 显示空间尺寸 = 预览里那张纸的宽高
+        wPt: vp.width,
+        hPt: vp.height,
+        // 复制一份：pdf.js 内部可能复用同一个数组
+        view: [view[0], view[1], view[2], view[3]],
+        rotation: page.rotate,
+        userUnit: page.userUnit ?? 1,
+      };
+      page.cleanup();
+      return info;
+    }),
+  );
 }
 
 /**

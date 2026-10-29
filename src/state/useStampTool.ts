@@ -8,7 +8,7 @@ import {
   stampDocument,
 } from '../lib/exporter';
 import { decodeSealPixels, loadSealFile, reencodeSealPng } from '../lib/seal';
-import { saveBytesAs } from '../lib/saveAs';
+import { saveBytesAs, shareFile } from '../lib/saveAs';
 import { mmToPt, ptToMm } from '../lib/units';
 import {
   clamp,
@@ -540,6 +540,20 @@ export function useStampTool() {
       exportAsRef.current = false;
       const r = await buildExport(force);
       if (!r) return;
+      // 手机：优先弹系统分享面板（WebView 无下载器，blob 下载静默失败）
+      if (isMobileEnv()) {
+        const res = await shareFile(r.out, r.fileName, 'application/pdf');
+        if (res.status === 'shared') {
+          dispatch({ type: 'DONE', message: '已通过系统分享导出，可在面板里选「保存到文件」。' });
+          return;
+        }
+        if (res.status === 'cancelled') return;
+        dispatch({
+          type: 'ERROR',
+          message: `分享面板没弹出（${res.reason ?? '原因未知'}）。请再点一次「导出」。`,
+        });
+        return;
+      }
       downloadBlob(r.out, r.fileName);
       // 桌面版默认把文件直接落进系统下载目录。必须明确告诉用户文件去哪了，
       // 否则「点了没反应」=「以为坏了」。
@@ -648,6 +662,9 @@ export function useStampTool() {
 
 let idSeq = 0;
 const nextId = () => `stamp-${++idSeq}-${Date.now().toString(36)}`;
+
+/** 手机 WebView 环境（与 App.tsx 的 MOBILE_UA 同判据）。 */
+const isMobileEnv = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
 const clampZoom = (z: number) => Math.min(4, Math.max(0.25, Math.round(z * 20) / 20));
 
