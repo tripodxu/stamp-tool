@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="description" content="在浏览器里给 PDF 盖公章：拖拽、缩放、旋转，批量盖章，文件不上传。部署于 Cloudflare Workers。" />
+    <!-- 手机：禁整页缩放（画布有自己的双指缩放），viewport-fit 给刘海屏让出安全区 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>印章工具 · PDF 公章盖章</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
